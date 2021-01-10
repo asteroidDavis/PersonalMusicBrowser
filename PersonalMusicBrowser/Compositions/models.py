@@ -23,6 +23,7 @@ class Discography(models.Model):
     storage_root_path = models.FilePathField(blank=False)
     type = models.TextField(blank=False)
 
+
 class Song(models.Model):
     title = models.TextField(max_length=256, primary_key=True, blank=False)
     sheet_music = models.FilePathField(blank=True)
