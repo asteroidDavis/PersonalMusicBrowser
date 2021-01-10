@@ -16,6 +16,9 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from PersonalMusicBrowser.Compositions.views import SongList
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('discography/', SongList.as_view())
 ]

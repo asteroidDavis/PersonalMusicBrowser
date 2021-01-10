@@ -7,7 +7,8 @@ class Band(models.Model):
 
 class Artist(models.Model):
     name = models.TextField(max_length=128, blank=False)
-    bands = models.ManyToManyField()
+    bands = models.ManyToManyField(Band)
+
 
 class Album(models.Model):
     title = models.TextField(max_length=256, primary_key=True, blank=False)
@@ -25,12 +26,12 @@ class Discography(models.Model):
 
 
 class Song(models.Model):
-    title = models.TextField(max_length=256, primary_key=True, blank=False)
+    title = models.TextField(max_length=256, blank=False)
     sheet_music = models.FilePathField(blank=True)
     lyrics = models.FilePathField(blank=True)
-    album = models.ForeignKey(Album, on_delete=models.PROTECT, primary_key=True)
+    album = models.ForeignKey(Album, on_delete=models.PROTECT)
     artists = models.ManyToManyField(Artist)
-    discography = models.ForeignKey(Discography)
+    discography = models.ForeignKey(Discography, on_delete=models.PROTECT)
 
 
 class Recording(models.Model):
