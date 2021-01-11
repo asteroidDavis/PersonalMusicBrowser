@@ -1,5 +1,8 @@
 .idea/
 target/
 *.db
+*.sqlite3
 
 *settings.py
+
+*__pycache__*

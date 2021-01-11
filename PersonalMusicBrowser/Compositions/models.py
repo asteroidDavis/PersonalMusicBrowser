@@ -1,6 +1,10 @@
 from django.db import models
 
 
+class Instrument(models.Model):
+    name = models.TextField(max_length="64", blank=False)
+
+
 class Band(models.Model):
     name = models.TextField(max_length=128, blank=False)
 
@@ -32,6 +36,18 @@ class Song(models.Model):
     album = models.ForeignKey(Album, on_delete=models.PROTECT)
     artists = models.ManyToManyField(Artist)
     discography = models.ForeignKey(Discography, on_delete=models.PROTECT)
+
+
+class Cover(Song):
+    notes = models.ImageField()
+    covered_instruments = models.ManyToManyField(Instrument)
+    notes_completed = models.BooleanField()
+
+
+class Composition(Song):
+    written_instruments = models.ManyToManyField(Instrument)
+    beats_per_minute_upper = models.IntegerField()
+    beats_per_minute_lower = models.IntegerField()
 
 
 class Recording(models.Model):
