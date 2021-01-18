@@ -2,9 +2,20 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <title>{% block title %} Personal Music Browser {%  endblock %}</title>
+    {% load static %}
+
 </head>
 <body>
-
+    <h1>Personal Music Browser</h1>
+    <table>
+        <tr>
+            <td><a href="/Discography/">Discography</a></td>
+            <td><a href="/Compositions/">Discography</a></td>
+            <td><a href="/Covers/">Discography</a></td>\
+        </tr>
+    </table>
+    {% block content %}
+    {% endblock %}
 </body>
 </html>
