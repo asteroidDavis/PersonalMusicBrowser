@@ -1,6 +1,7 @@
+from django.conf import settings
 from django.db import models
 
-import os
+import pathlib
 
 
 class Instrument(models.Model):
@@ -22,22 +23,18 @@ class Album(models.Model):
     url = models.URLField(blank=True)
 
 
-class Discography(models.Model):
-    """
-    This represents the root storage element of music.
-    For me this is OneDrive. So the storage root path is OneDrive's mount point. And the type is the string 'onedrive'
-    """
-    storage_root_path = models.FilePathField(path=os.path.expanduser('~') or '.', blank=False, allow_files=False, allow_folders=True)
-    type = models.TextField(blank=False, choices=[("Onedrive",)*2, ("Directory",)*2])
+def get_discography_path() -> str:
+    return settings.DISCOGRAPHY_ROOT
 
 
 class Song(models.Model):
     title = models.TextField(max_length=256, blank=False)
-    sheet_music = models.FilePathField(path="", blank=True)
-    lyrics = models.FilePathField(path=".", blank=True)
     album = models.ForeignKey(Album, on_delete=models.PROTECT)
     artists = models.ManyToManyField(Artist)
-    discography = models.ForeignKey(Discography, on_delete=models.PROTECT)
+    sheet_music = models.FilePathField(path=get_discography_path(), blank=True, allow_files=True, allow_folders=False,
+                                       recursive=True)
+    lyrics = models.FilePathField(path=get_discography_path(), blank=True, allow_files=True, allow_folders=False,
+                                  recursive=True)
 
 
 class Cover(Song):
@@ -56,6 +53,7 @@ class Recording(models.Model):
     instruments = models.ManyToManyField(Instrument)
     type = models.TextField(max_length=64, choices=[
         ('audacity',)*2, ('mix',)*2, ('master',)*2, ('loop-core-list',)*2, ('wav',)*2, ('audacity',)*2])
-    path = models.FilePathField(path=".", blank=True)
+    path = models.FilePathField(path=get_discography_path(), blank=True, allow_files=True, allow_folders=False,
+                                recursive=True)
     song = models.ForeignKey(Song, blank=False, on_delete=models.PROTECT)
     notes = models.ImageField(blank=True)

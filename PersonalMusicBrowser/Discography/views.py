@@ -2,7 +2,7 @@ from django.db.models import ForeignKey
 from django.shortcuts import render
 from django.views.generic import CreateView,DeleteView, ListView, UpdateView
 
-from PersonalMusicBrowser.Discography.models import Discography, Song
+from PersonalMusicBrowser.Discography.models import Song
 
 # Create your views here.
 class SongList(ListView):
