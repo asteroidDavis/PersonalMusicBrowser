@@ -39,7 +39,7 @@ class Song(models.Model):
 
 
 class Cover(Song):
-    notes = models.ImageField()
+    notes = models.ImageField(blank=True)
     covered_instruments = models.ManyToManyField(Instrument)
     notes_completed = models.BooleanField()
 
@@ -51,7 +51,9 @@ class Composition(Song):
 
 
 class Recording(models.Model):
-    instruments = models.JSONField(blank=True)
-    type = models.TextField(max_length=64)
+    instruments = models.ManyToManyField(Instrument)
+    type = models.TextField(max_length=64, choices=[
+        ('audacity',)*2, ('mix',)*2, ('master',)*2, ('loop-core-list',)*2, ('wav',)*2, ('audacity',)*2])
     path = models.FilePathField(blank=True)
     song = models.ForeignKey(Song, blank=False, on_delete=models.PROTECT)
+    notes = models.ImageField(blank=True)

@@ -20,5 +20,6 @@ from PersonalMusicBrowser.Discography.views import SongList
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('discography/', SongList.as_view())
+    path('discography/', SongList.as_view()),
+    path('', SongList.as_view()),
 ]
