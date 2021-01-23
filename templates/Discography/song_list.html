@@ -1,10 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Publishers</h2>
+<h2>Songs</h2>
+<p>Found {{ object_list.count }} songs</p>
 <ul>
-    {% for publisher in object_list %}
-        <li>{{ publisher.name }}</li>
+    {% for song in object_list %}
+        <li>{{ song }}</li>
+        {% if not song.sheet_music and not song.sheet_music == '' %}
+            <li>{{ song.sheet_music }}</li>
+        {% endif %}
+    {% empty %}
+        <li>No songs found :(</li>
     {% endfor %}
 </ul>
 
