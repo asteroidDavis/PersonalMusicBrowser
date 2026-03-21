@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Add Album — Personal Music Browser{% endblock %}
+{% block content %}
+<h2>Add Album</h2>
+<form class="form" method="post">
+    <div class="form-group">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required value="{{ title }}">
+    </div>
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="released" value="true" {% if released %}checked{% endif %}>
+            Released
+        </label>
+    </div>
+    <div class="form-group">
+        <label for="url">URL</label>
+        <input type="url" id="url" name="url" value="{{ url }}">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/albums" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

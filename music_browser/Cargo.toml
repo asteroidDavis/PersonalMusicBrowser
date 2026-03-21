@@ -1,0 +1,23 @@
+[package]
+name = "music-browser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = { version = "4", features = ["macros"] }
+actix-files = "0.6"
+askama = { version = "0.12", features = ["with-actix-web"] }
+askama_actix = "0.14"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+dotenvy = "0.15"
+
+[dev-dependencies]
+actix-rt = "2"
+actix-test = "0.1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

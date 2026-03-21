@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Instruments — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Instruments</h2>
+    <a href="/instruments/new" class="btn btn-primary">+ Add Instrument</a>
+</div>
+{% if instruments.is_empty() %}
+    <p class="empty">No instruments yet.</p>
+{% else %}
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for i in instruments %}
+            <tr>
+                <td>{{ i.name }}</td>
+                <td class="actions">
+                    <form method="post" action="/instruments/{{ i.id }}/delete" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+{% endblock %}

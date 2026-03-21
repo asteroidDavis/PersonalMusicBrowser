@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{% if editing %}Edit Song{% else %}Add Song{% endif %} — Personal Music Browser{% endblock %}
+{% block content %}
+<h2>{% if editing %}Edit Song{% else %}Add Song{% endif %}</h2>
+<form class="form" method="post">
+    <div class="form-group">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required value="{{ title }}">
+    </div>
+    <div class="form-group">
+        <label for="album_id">Album</label>
+        <select id="album_id" name="album_id" required>
+            <option value="">-- Select Album --</option>
+            {% for a in albums %}
+                <option value="{{ a.id }}" {% if a.id == album_id %}selected{% endif %}>{{ a.title }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="song_type">Song Type</label>
+        <select id="song_type" name="song_type">
+            <option value="song" {% if song_type == "song" %}selected{% endif %}>Song</option>
+            <option value="cover" {% if song_type == "cover" %}selected{% endif %}>Cover</option>
+            <option value="composition" {% if song_type == "composition" %}selected{% endif %}>Composition</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="sheet_music">Sheet Music Path</label>
+        <input type="text" id="sheet_music" name="sheet_music" value="{{ sheet_music }}">
+    </div>
+    <div class="form-group">
+        <label for="lyrics">Lyrics Path</label>
+        <input type="text" id="lyrics" name="lyrics" value="{{ lyrics }}">
+    </div>
+    <div class="form-group">
+        <label>Artists</label>
+        {% for a in artists %}
+            <label class="checkbox-label">
+                <input type="checkbox" name="artist_ids" value="{{ a.id }}" {% if a.selected %}checked{% endif %}>
+                {{ a.name }}
+            </label>
+        {% endfor %}
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

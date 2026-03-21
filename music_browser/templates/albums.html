@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Albums — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Albums</h2>
+    <a href="/albums/new" class="btn btn-primary">+ Add Album</a>
+</div>
+{% if albums.is_empty() %}
+    <p class="empty">No albums yet.</p>
+{% else %}
+    <table>
+        <thead>
+            <tr><th>Title</th><th>Released</th><th>URL</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for a in albums %}
+            <tr>
+                <td>{{ a.title }}</td>
+                <td>{% if a.released %}✓{% else %}✗{% endif %}</td>
+                <td>{% if a.url.is_empty() %}—{% else %}<a href="{{ a.url }}" style="color:var(--accent)">{{ a.url }}</a>{% endif %}</td>
+                <td class="actions">
+                    <form method="post" action="/albums/{{ a.id }}/delete" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+{% endblock %}
