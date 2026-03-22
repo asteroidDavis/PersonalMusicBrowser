@@ -10,12 +10,13 @@
 {% else %}
     <table>
         <thead>
-            <tr><th>Name</th><th>Actions</th></tr>
+            <tr><th>Name</th><th>Type</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for i in instruments %}
             <tr>
                 <td>{{ i.name }}</td>
+                <td>{{ i.instrument_type }}</td>
                 <td class="actions">
                     <form method="post" action="/instruments/{{ i.id }}/delete" style="display:inline">
                         <button type="submit" class="btn btn-sm btn-danger">Delete</button>

@@ -1,12 +1,10 @@
-mod db;
-
 use actix_web::{web, App, HttpResponse, HttpServer};
 use askama::Template;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-use db::models::*;
-use db::queries;
+use music_browser::db::models::*;
+use music_browser::db::queries;
 
 // ---------------------------------------------------------------------------
 // Template structs
@@ -36,6 +34,12 @@ struct SongFormTemplate {
     song_type: String,
     sheet_music: String,
     lyrics: String,
+    key: String,
+    bpm_lower: Option<i32>,
+    bpm_upper: Option<i32>,
+    original_artist: String,
+    score_url: String,
+    description: String,
     albums: Vec<Album>,
     artists: Vec<ArtistRow>,
 }
@@ -95,6 +99,7 @@ struct InstrumentsTemplate {
 #[template(path = "instrument_form.html")]
 struct InstrumentFormTemplate {
     name: String,
+    instrument_type: String,
 }
 
 #[derive(Template)]
@@ -130,12 +135,25 @@ struct BandFormTemplate {
 #[derive(Deserialize)]
 struct SongFormData {
     title: String,
-    album_id: i64,
+    #[serde(default)]
+    album_id: Option<i64>,
     song_type: String,
     #[serde(default)]
     sheet_music: String,
     #[serde(default)]
     lyrics: String,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    bpm_lower: Option<i32>,
+    #[serde(default)]
+    bpm_upper: Option<i32>,
+    #[serde(default)]
+    original_artist: String,
+    #[serde(default)]
+    score_url: String,
+    #[serde(default)]
+    description: String,
     #[serde(default)]
     artist_ids: Vec<i64>,
 }
@@ -159,6 +177,8 @@ struct ArtistFormData {
 #[derive(Deserialize)]
 struct InstrumentFormData {
     name: String,
+    #[serde(default)]
+    instrument_type: String,
 }
 
 #[derive(Deserialize)]
@@ -213,6 +233,12 @@ async fn song_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse
         song_type: "song".into(),
         sheet_music: String::new(),
         lyrics: String::new(),
+        key: String::new(),
+        bpm_lower: None,
+        bpm_upper: None,
+        original_artist: String::new(),
+        score_url: String::new(),
+        description: String::new(),
         albums,
         artists: artists
             .into_iter()
@@ -232,13 +258,19 @@ async fn song_create(
     pool: web::Data<SqlitePool>,
     form: web::Form<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
-    let st = SongType::from_str(&form.song_type).unwrap_or(SongType::Song);
+    let st = SongType::parse(&form.song_type).unwrap_or(SongType::Song);
     let input = CreateSong {
         title: form.title.clone(),
         album_id: form.album_id,
         sheet_music: form.sheet_music.clone(),
         lyrics: form.lyrics.clone(),
         song_type: st,
+        key: form.key.clone(),
+        bpm_lower: form.bpm_lower,
+        bpm_upper: form.bpm_upper,
+        original_artist: form.original_artist.clone(),
+        score_url: form.score_url.clone(),
+        description: form.description.clone(),
         artist_ids: form.artist_ids.clone(),
     };
     queries::create_song(&pool, &input)
@@ -271,10 +303,16 @@ async fn song_edit(
     let body = SongFormTemplate {
         editing: true,
         title: song.title,
-        album_id: song.album_id,
+        album_id: song.album_id.unwrap_or(0),
         song_type: song.song_type.to_string(),
         sheet_music: song.sheet_music,
         lyrics: song.lyrics,
+        key: song.key,
+        bpm_lower: song.bpm_lower,
+        bpm_upper: song.bpm_upper,
+        original_artist: song.original_artist,
+        score_url: song.score_url,
+        description: song.description,
         albums,
         artists: artists
             .into_iter()
@@ -304,6 +342,12 @@ async fn song_update(
         album_id: form.album_id,
         sheet_music: form.sheet_music.clone(),
         lyrics: form.lyrics.clone(),
+        key: form.key.clone(),
+        bpm_lower: form.bpm_lower,
+        bpm_upper: form.bpm_upper,
+        original_artist: form.original_artist.clone(),
+        score_url: form.score_url.clone(),
+        description: form.description.clone(),
         artist_ids: form.artist_ids.clone(),
     };
     queries::update_song(&pool, &input)
@@ -472,6 +516,7 @@ async fn instrument_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpR
 async fn instrument_new() -> actix_web::Result<HttpResponse> {
     let body = InstrumentFormTemplate {
         name: String::new(),
+        instrument_type: "other".into(),
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -482,8 +527,14 @@ async fn instrument_create(
     pool: web::Data<SqlitePool>,
     form: web::Form<InstrumentFormData>,
 ) -> actix_web::Result<HttpResponse> {
+    let it = if form.instrument_type.is_empty() {
+        "other".to_string()
+    } else {
+        form.instrument_type.clone()
+    };
     let input = CreateInstrument {
         name: form.name.clone(),
+        instrument_type: it,
     };
     queries::create_instrument(&pool, &input)
         .await
@@ -608,7 +659,7 @@ async fn main() -> std::io::Result<()> {
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:music_browser.db".into());
 
-    let pool = db::pool::init_pool(&database_url)
+    let pool = music_browser::db::pool::init_pool(&database_url)
         .await
         .expect("Failed to initialise database");
 

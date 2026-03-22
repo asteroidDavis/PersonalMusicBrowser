@@ -9,8 +9,8 @@
     </div>
     <div class="form-group">
         <label for="album_id">Album</label>
-        <select id="album_id" name="album_id" required>
-            <option value="">-- Select Album --</option>
+        <select id="album_id" name="album_id">
+            <option value="">-- None --</option>
             {% for a in albums %}
                 <option value="{{ a.id }}" {% if a.id == album_id %}selected{% endif %}>{{ a.title }}</option>
             {% endfor %}
@@ -22,15 +22,43 @@
             <option value="song" {% if song_type == "song" %}selected{% endif %}>Song</option>
             <option value="cover" {% if song_type == "cover" %}selected{% endif %}>Cover</option>
             <option value="composition" {% if song_type == "composition" %}selected{% endif %}>Composition</option>
+            <option value="original" {% if song_type == "original" %}selected{% endif %}>Original</option>
+            <option value="practice" {% if song_type == "practice" %}selected{% endif %}>Practice</option>
         </select>
+    </div>
+    <div class="form-group">
+        <label for="original_artist">Original Artist</label>
+        <input type="text" id="original_artist" name="original_artist" value="{{ original_artist }}">
+    </div>
+    <div class="form-group">
+        <label for="key">Key</label>
+        <input type="text" id="key" name="key" value="{{ key }}" placeholder="e.g. C major, Am">
+    </div>
+    <div class="form-group" style="display:flex;gap:1rem">
+        <div>
+            <label for="bpm_lower">BPM Lower</label>
+            <input type="number" id="bpm_lower" name="bpm_lower" value="{% match bpm_lower %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+        </div>
+        <div>
+            <label for="bpm_upper">BPM Upper</label>
+            <input type="number" id="bpm_upper" name="bpm_upper" value="{% match bpm_upper %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+        </div>
     </div>
     <div class="form-group">
         <label for="sheet_music">Sheet Music Path</label>
         <input type="text" id="sheet_music" name="sheet_music" value="{{ sheet_music }}">
     </div>
     <div class="form-group">
+        <label for="score_url">Score URL</label>
+        <input type="text" id="score_url" name="score_url" value="{{ score_url }}">
+    </div>
+    <div class="form-group">
         <label for="lyrics">Lyrics Path</label>
         <input type="text" id="lyrics" name="lyrics" value="{{ lyrics }}">
+    </div>
+    <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3">{{ description }}</textarea>
     </div>
     <div class="form-group">
         <label>Artists</label>

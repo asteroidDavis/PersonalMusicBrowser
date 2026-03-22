@@ -5,73 +5,81 @@ A lightweight music production planning app built with **Rust**, **Actix-web**, 
 ## Model Diagram
 
 ```
-┌─────────────┐       ┌──────────────┐       ┌─────────────┐
-│  Instrument  │       │     Band     │       │    Album    │
-├─────────────┤       ├──────────────┤       ├─────────────┤
-│ id    (PK)  │       │ id    (PK)   │       │ id    (PK)  │
-│ name        │       │ name         │       │ title       │
-└──────┬──────┘       └──────┬───────┘       │ released    │
-       │                     │               │ url         │
-       │                     │               └──────┬──────┘
-       │              ┌──────┴───────┐              │
-       │              │ artist_bands │              │
-       │              │  (M2M join)  │              │
-       │              └──────┬───────┘              │
-       │                     │                      │
-       │              ┌──────┴───────┐              │
-       │              │    Artist    │              │
-       │              ├──────────────┤              │
-       │              │ id    (PK)   │              │
-       │              │ name         │              │
-       │              └──────┬───────┘              │
-       │                     │                      │
-       │              ┌──────┴───────┐              │
-       │              │ song_artists │              │
-       │              │  (M2M join)  │              │
-       │              └──────┬───────┘              │
-       │                     │                      │
-       │              ┌──────┴───────┐     FK       │
-       │              │     Song     │◄─────────────┘
-       │              ├──────────────┤
-       │              │ id     (PK)  │
-       │              │ title        │
-       │              │ album_id(FK) │
-       │              │ sheet_music  │
-       │              │ lyrics       │
-       │              │ song_type    │──┐
-       │              └──────┬───────┘  │
-       │                     │          │
-       │    ┌────────────────┼──────────┼──────────────┐
-       │    │                │          │              │
-       │    ▼                ▼          ▼              ▼
-       │ ┌─────────┐  ┌───────────┐ ┌──────────────┐
-       │ │Recording│  │CoverDetail│ │ Composition  │
-       │ ├─────────┤  ├───────────┤ │    Detail     │
-       │ │id  (PK) │  │song_id(FK)│ ├──────────────┤
-       │ │rec_type │  │notes_image│ │ song_id (FK) │
-       │ │path     │  │notes_done │ │ bpm_upper    │
-       │ │song_id  │  └───────────┘ │ bpm_lower    │
-       │ │notes_img│                └──────────────┘
-       │ └────┬────┘
-       │      │
-       ├──────┘  (recording_instruments, cover_instruments,
-       │          composition_instruments — M2M joins)
+┌──────────────┐       ┌──────────────┐       ┌─────────────┐
+│  Instrument   │       │     Band     │       │    Album    │
+├──────────────┤       ├──────────────┤       ├─────────────┤
+│ id      (PK) │       │ id    (PK)   │       │ id    (PK)  │
+│ name         │       │ name         │       │ title       │
+│ inst_type    │       └──────┬───────┘       │ released    │
+└──────┬───────┘              │               │ url         │
+       │               ┌──────┴───────┐       └──────┬──────┘
+       │               │ artist_bands │              │
+       │               │  (M2M join)  │              │
+       │               └──────┬───────┘              │
+       │                      │                      │
+       │               ┌──────┴───────┐              │
+       │               │    Artist    │              │
+       │               └──────┬───────┘              │
+       │                      │                      │
+       │               ┌──────┴───────┐              │
+       │               │ song_artists │              │
+       │               └──────┬───────┘              │
+       │                      │               FK (nullable)
+       │               ┌──────┴───────┐◄─────────────┘
+       │               │     Song     │
+       │               ├──────────────┤
+       │               │ id     (PK)  │     ┌──────────────┐
+       │               │ title        │     │    Device    │
+       │               │ album_id(FK) │     ├──────────────┤
+       │               │ song_type*   │     │ id     (PK)  │
+       │               │ key          │     │ name         │
+       │               │ bpm_lower    │     │ device_type  │
+       │               │ bpm_upper    │     │ manual_path  │
+       │               │ original_art │     │ notes        │
+       │               │ score_url    │     └──────┬───────┘
+       │               │ description  │            │
+       │               └──────┬───────┘     ┌──────┴───────┐
+       │                      │             │DevicePreset  │
+       │   ┌──────────┬───────┼─────┬───────┤preset_code   │
+       │   │          │       │     │       └──────┬───────┘
+       │   ▼          ▼       ▼     ▼              │
+       │ Recording  Cover  Comp  SongInstrument◄───┘ (M2M)
+       │            Detail Detail   │
+       │                          has presets
        │
-  Instrument is linked via M2M to Recording, Cover, and Composition
+       │   Song also has:
+       │    ├── ProductionStage (1:M) ── ProductionStep (1:M)
+       │    ├── SongFile (1:M)
+       │    └── SongInstrument (1:M) ── DevicePreset (M2M)
+       │
+       │   Standalone:
+       │    └── Sample ── Instrument (M2M)
+       │
+  Instrument is linked via M2M to Recording, Cover, Composition,
+  SongInstrument, ProductionStep, SongFile, and Sample.
 ```
+
+*Song types: `song`, `cover`, `composition`, `original`, `practice`
 
 ### Entity Summary
 
 | Entity | Description |
 |---|---|
-| **Instrument** | A musical instrument (e.g. Guitar, Piano) |
+| **Instrument** | A musical instrument with type (guitar, bass, piano, drums, etc.) |
 | **Band** | A named group of artists |
 | **Artist** | A musician; belongs to zero or more Bands |
 | **Album** | A collection of songs; has released status and URL |
-| **Song** | A track on an album; type is `song`, `cover`, or `composition` |
+| **Song** | A track; type is `song`, `cover`, `composition`, `original`, or `practice`. Album is optional. |
 | **CoverDetail** | Extra fields for cover songs (notes image, completion status, instruments) |
 | **CompositionDetail** | Extra fields for compositions (BPM range, instruments) |
-| **Recording** | A recorded file for a song (type: audacity, mix, master, loop-core-list, wav) |
+| **Recording** | A recorded file for a song (type: audacity, mix, master, loop-core-list, wav, daw-project, practice) |
+| **Device** | A physical device (pedal, amp, synth, interface, daw, other) |
+| **DevicePreset** | A named preset/program change on a Device |
+| **SongInstrument** | Per-song instrument config with linked presets, score URL, production/mastering paths |
+| **ProductionStage** | A production phase for a song (tracking, mixing, mastering, etc.) with status |
+| **ProductionStep** | An individual step within a stage, optionally tied to an instrument |
+| **SongFile** | A file associated with a song (score, daw_project, audio, etc.) |
+| **Sample** | A reusable audio sample with optional BPM, key, and linked instruments |
 
 ## Prerequisites
 
@@ -136,6 +144,74 @@ sqlx migrate add -r <description> --source ./migrations
 sqlx migrate run --source ./migrations
 ```
 
+## Bulk Import
+
+The `bulk-import` CLI tool imports data from markdown tables or another SQLite database.
+
+### From Markdown
+
+Import cover song setups from a markdown file containing pipe-delimited tables
+with instrument sections headed by `**Guitar Songs**`, `**Bass Songs**`, or `**Piano Songs**`.
+
+```bash
+cd music_browser
+
+# Dry run (parse and print, no database writes)
+cargo run --bin bulk-import -- markdown --file ../"Cover song setup CC, PC, and preset codes 1.md" --dry-run
+
+# Import for real
+cargo run --bin bulk-import -- markdown --file ../"Cover song setup CC, PC, and preset codes 1.md"
+```
+
+**What it does:**
+- Parses each table row into a song (type: cover) with instrument section
+- Creates songs (skips if title already exists)
+- Creates instruments (Guitar, Bass, Piano) if missing
+- Creates devices (Ultrawave, Plethora X5, POG2) and their presets from the table columns
+- Links everything via `song_instruments` and `song_instrument_presets`
+
+**Expected markdown format:**
+
+```markdown
+**Guitar Songs**
+
+| Song | Ultrawave program changes | Plethora program changes | POG2 presets | Other enumerated changes | Description | Score |
+| --- | --- | --- | --- | --- | --- | --- |
+| My Song | PC1 | PC8 | None | STRAT_POS3 | A description | [score](https://example.com) |
+
+**Bass Songs**
+
+| id | Song | Ultrawave program changes | Plethora program changes | POG2 presets | Other enumerated changes | Score |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Bass Song | None | None | None | PBASS_T10 | [score](https://example.com/bass) |
+```
+
+### From SQLite
+
+Copy rows from another SQLite database, skipping duplicates by name/title:
+
+```bash
+# Dry run
+cargo run --bin bulk-import -- sqlite --file /path/to/source.db --dry-run
+
+# Import
+cargo run --bin bulk-import -- sqlite --file /path/to/source.db
+```
+
+**What it does:**
+- Attaches the source database
+- Copies instruments, bands, artists, albums (by name/title, skipping existing)
+- Copies songs (by title, using only columns that exist in both source and target)
+- Detaches the source database
+
+### Import Checklist
+
+- [ ] Back up your database before importing: `cp music_browser.db music_browser.db.bak`
+- [ ] Run with `--dry-run` first to preview what would be imported
+- [ ] Run the actual import
+- [ ] Verify with `sqlite3 music_browser.db "SELECT COUNT(*) FROM songs;"`
+- [ ] Start the web server and spot-check the imported data
+
 ## Testing
 
 ### Run All Tests (terminal)
@@ -161,13 +237,29 @@ cargo test test_song_crud -- --exact # exact match
 
 ### Test Coverage
 
-The test suite (`tests/db_tests.rs`) covers:
-- CRUD for instruments, bands, artists, albums, songs, recordings
-- Many-to-many relationships (artist↔band, song↔artist, recording↔instrument)
-- Cover and Composition detail tables
-- Song type and recording type CHECK constraints
-- FK RESTRICT (album can't be deleted while songs reference it)
-- Migration idempotency (all expected tables exist)
+The test suite covers:
+
+**Database schema tests** (`tests/db_tests.rs` — 29 tests):
+- Migration creates all 22 expected tables
+- CRUD for instruments (with type), bands, artists, albums, songs, recordings
+- Songs with and without albums (nullable album_id)
+- New song fields: key, bpm_lower/upper, original_artist, score_url, description
+- Expanded song types: song, cover, composition, original, practice
+- Expanded recording types: audacity, mix, master, loop-core-list, wav, daw-project, practice
+- Device CRUD with type constraints and preset cascade deletion
+- Song instruments with device preset links (M2M)
+- Production stages with unique constraint and step cascades
+- Song files with file_type constraints
+- Sample CRUD with instrument links
+- FK constraints: album delete → SET NULL on songs, recording RESTRICT on song delete
+- Song instrument cascade on song delete
+
+**Bulk import tests** (`src/bulk_import.rs` — 9 tests):
+- Markdown link extraction
+- Guitar, bass, piano section parsing
+- Multi-section parsing
+- Empty row and empty input handling
+- Capitalize helper
 
 ## Pre-commit Hooks
 
@@ -202,16 +294,19 @@ music_browser/
 ├── Cargo.toml                 # Dependencies and build config
 ├── .env                       # Environment variables (gitignored)
 ├── migrations/
-│   └── 0001_initial.sql       # Database schema
+│   ├── 0001_initial.sql       # Initial schema (discography)
+│   └── 0002_merge_manual_model.sql  # Merged production model
 ├── scripts/
 │   └── install-hooks.sh       # Pre-commit hook installer
 ├── src/
+│   ├── lib.rs                 # Library crate (shared db module)
 │   ├── main.rs                # Actix-web server, routes, handlers
+│   ├── bulk_import.rs         # CLI: bulk import from markdown/SQLite
 │   └── db/
 │       ├── mod.rs             # Module declarations
-│       ├── models.rs          # Rust structs and enums
+│       ├── models.rs          # Rust structs and enums (all entities)
 │       ├── pool.rs            # SQLite pool init and migrations
-│       └── queries.rs         # SQL query functions
+│       └── queries.rs         # SQL query functions (all CRUD)
 ├── templates/                 # Askama HTML templates
 │   ├── base.html              # Layout with nav
 │   ├── songs.html             # Song list
@@ -226,7 +321,7 @@ music_browser/
 │   ├── band_form.html         # Create band
 │   └── recordings.html        # Recording list
 └── tests/
-    └── db_tests.rs            # Database integration tests
+    └── db_tests.rs            # Database integration tests (29 tests)
 ```
 
 ## Tech Stack
@@ -238,3 +333,5 @@ music_browser/
 | Templates | Askama 0.12 (Jinja2-like) |
 | Database | SQLite via SQLx 0.8 |
 | Migrations | SQLx migrate |
+| CLI | Clap 4 (bulk-import binary) |
+| Parsing | Regex 1 (markdown table parsing) |
