@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Add Production Stage — Personal Music Browser{% endblock %}
+{% block content %}
+<h2>Add Production Stage for "{{ song_title }}"</h2>
+<form class="form" method="post">
+    <div class="form-group">
+        <label for="stage">Stage Name</label>
+        <input type="text" id="stage" name="stage" required placeholder="e.g. writing, composition, tracking, mixing, mastering">
+    </div>
+    <div class="form-group">
+        <label for="status">Initial Status</label>
+        <select id="status" name="status">
+            <option value="not_started">∅ Not Started</option>
+            <option value="in_progress">🔄 In Progress</option>
+            <option value="nearing_completion">🏁 Nearing Completion</option>
+            <option value="complete">✅ Complete</option>
+            <option value="skipped">🚫 Skipped</option>
+            <option value="borked">❤️‍🩹 Borked</option>
+            <option value="exceptional">📈 Exceptional</option>
+        </select>
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/production" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

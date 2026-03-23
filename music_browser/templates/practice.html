@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Practice — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header practice-header">
+    <h2>🎸 Practice</h2>
+</div>
+
+{% if songs.is_empty() %}
+    <p class="empty">No songs yet. <a href="/songs/new" style="color:var(--accent)">Add one?</a></p>
+{% else %}
+
+{% for entry in songs %}
+<div class="practice-card">
+    <div class="practice-card-header">
+        <h3>
+            <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
+            {{ entry.title }}
+            {% if !entry.original_artist.is_empty() %}<span class="text-muted"> — {{ entry.original_artist }}</span>{% endif %}
+        </h3>
+        <div class="practice-card-meta">
+            {% if !entry.key.is_empty() %}<span class="meta-tag">🎵 {{ entry.key }}</span>{% endif %}
+            {% if !entry.bpm.is_empty() %}<span class="meta-tag">🥁 {{ entry.bpm }}</span>{% endif %}
+            {% if !entry.score_url.is_empty() %}<a href="{{ entry.score_url }}" target="_blank" class="meta-tag meta-link">📄 Score</a>{% endif %}
+        </div>
+    </div>
+
+    {% if entry.instruments.is_empty() && entry.files.is_empty() %}
+        <p class="count" style="padding:.5rem 0">No practice details yet.
+            <a href="/songs/{{ entry.song_id }}/edit" style="color:var(--accent)">Add details?</a>
+        </p>
+    {% endif %}
+
+    {% if !entry.instruments.is_empty() %}
+    <table class="practice-table">
+        <thead>
+            <tr>
+                <th>Instrument</th>
+                <th>Presets / PC Codes</th>
+                <th>Paths</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for inst in entry.instruments %}
+            <tr>
+                <td><strong>{{ inst.instrument_name }}</strong></td>
+                <td class="presets-cell">
+                    {% for p in inst.presets %}
+                        <span class="preset-chip" title="{{ p.description }}">
+                            <code>{{ p.preset_code }}</code> {{ p.name }}
+                        </span>
+                    {% endfor %}
+                    {% if inst.presets.is_empty() %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td class="paths-cell">
+                    {% if !inst.score_url.is_empty() %}<a href="{{ inst.score_url }}" target="_blank" class="path-link">📄 Score</a>{% endif %}
+                    {% if !inst.production_path.is_empty() %}<span class="path-link" title="Production path">🎛️ <code>{{ inst.production_path }}</code></span>{% endif %}
+                    {% if !inst.mastering_path.is_empty() %}<span class="path-link" title="Mastering path">🎚️ <code>{{ inst.mastering_path }}</code></span>{% endif %}
+                </td>
+                <td>{% if !inst.description.is_empty() %}{{ inst.description }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if !entry.files.is_empty() %}
+    <div class="practice-files">
+        <h4>📁 Project Files & Backing Tracks</h4>
+        <div class="file-grid">
+        {% for f in entry.files %}
+            <div class="file-card">
+                <span class="file-type-badge">{{ f.file_type }}</span>
+                <code>{{ f.path }}</code>
+                {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
+                {% if !f.description.is_empty() %}<p class="text-muted">{{ f.description }}</p>{% endif %}
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% endif %}
+{% endblock %}

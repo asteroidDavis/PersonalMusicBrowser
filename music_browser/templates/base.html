@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Personal Music Browser{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #1a1a2e; --surface: #16213e; --primary: #0f3460;
+            --accent: #e94560; --text: #eee; --text-muted: #aaa;
+            --border: #2a2a4a; --danger: #e94560; --radius: 6px;
+            --prod-accent: #f59e0b; --prod-surface: #1c1a10;
+            --prac-accent: #10b981; --prac-surface: #0d1f17;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+        .container { max-width:1200px; margin:0 auto; padding:0 1rem; }
+        nav { display:flex; align-items:center; justify-content:space-between; padding:1rem 0; border-bottom:1px solid var(--border); margin-bottom:2rem; flex-wrap:wrap; gap:.5rem; }
+        nav h1 { font-size:1.4rem; color:var(--accent); }
+        nav .nav-links { list-style:none; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+        nav .nav-links li a { color:var(--text-muted); text-decoration:none; font-size:.85rem; transition:color .2s; padding:.3rem .6rem; border-radius:var(--radius); }
+        nav .nav-links li a:hover { color:var(--accent); background:rgba(255,255,255,.05); }
+        nav .nav-sep { color:var(--border); font-size:.7rem; padding:0 .2rem; }
+        nav .nav-prod a { color:var(--prod-accent); font-weight:600; }
+        nav .nav-prod a:hover { background:rgba(245,158,11,.1); }
+        nav .nav-prac a { color:var(--prac-accent); font-weight:600; }
+        nav .nav-prac a:hover { background:rgba(16,185,129,.1); }
+        .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
+        .page-header h2 { font-size:1.5rem; }
+        .count { color:var(--text-muted); margin-bottom:1rem; font-size:.9rem; }
+        .empty { color:var(--text-muted); text-align:center; padding:3rem 1rem; font-size:1.1rem; }
+        .error { color:var(--danger); padding:.5rem; margin-bottom:1rem; }
+        table { width:100%; border-collapse:collapse; background:var(--surface); border-radius:var(--radius); overflow:hidden; }
+        th, td { padding:.75rem 1rem; text-align:left; border-bottom:1px solid var(--border); }
+        th { background:var(--primary); font-weight:600; font-size:.85rem; text-transform:uppercase; letter-spacing:.5px; }
+        tr:hover { background:rgba(255,255,255,.03); }
+        .actions { display:flex; gap:.5rem; }
+        .btn { display:inline-block; padding:.5rem 1rem; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); color:var(--text); text-decoration:none; font-size:.9rem; cursor:pointer; transition:all .2s; }
+        .btn:hover { border-color:var(--accent); color:var(--accent); }
+        .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+        .btn-primary:hover { background:#d63a52; color:#fff; }
+        .btn-danger { color:var(--danger); border-color:var(--danger); background:transparent; }
+        .btn-danger:hover { background:var(--danger); color:#fff; }
+        .btn-sm { padding:.25rem .6rem; font-size:.8rem; }
+        .form { max-width:600px; background:var(--surface); padding:2rem; border-radius:var(--radius); }
+        .form-group { margin-bottom:1.25rem; }
+        .form-group label { display:block; margin-bottom:.35rem; font-size:.9rem; color:var(--text-muted); }
+        .form-group input[type="text"], .form-group input[type="url"], .form-group input[type="number"], .form-group select, .form-group textarea {
+            width:100%; padding:.6rem .8rem; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:.95rem;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline:none; border-color:var(--accent); }
+        .checkbox-label { display:flex; align-items:center; gap:.35rem; font-size:.9rem; cursor:pointer; }
+        .form-actions { display:flex; gap:.75rem; margin-top:1.5rem; }
+        .flash { padding:.75rem 1rem; margin-bottom:1rem; border-radius:var(--radius); background:#1b5e20; color:#fff; }
+        .text-muted { color:var(--text-muted); font-size:.85rem; }
+
+        /* Production view styles */
+        .production-header h2 { color:var(--prod-accent); }
+        .legend { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1.5rem; font-size:.85rem; color:var(--text-muted); }
+        .prod-card { background:var(--prod-surface); border:1px solid rgba(245,158,11,.15); border-radius:var(--radius); padding:1.25rem; margin-bottom:1.25rem; }
+        .prod-card-header { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem; }
+        .prod-card-header h3 { font-size:1.15rem; }
+        .prod-card-meta { display:flex; gap:.5rem; flex-wrap:wrap; }
+        .prod-card-actions { display:flex; gap:.4rem; }
+        .meta-tag { background:rgba(255,255,255,.06); padding:.15rem .5rem; border-radius:var(--radius); font-size:.8rem; color:var(--text-muted); }
+        .meta-link { text-decoration:none; color:var(--prod-accent); }
+        .meta-link:hover { text-decoration:underline; }
+        .song-type-badge { display:inline-block; padding:.1rem .45rem; border-radius:3px; font-size:.7rem; text-transform:uppercase; font-weight:700; letter-spacing:.5px; margin-right:.4rem; }
+        .badge-song { background:#4a90d9; color:#fff; }
+        .badge-cover { background:#9b59b6; color:#fff; }
+        .badge-composition { background:#27ae60; color:#fff; }
+        .badge-original { background:#e67e22; color:#fff; }
+        .badge-practice { background:var(--prac-accent); color:#fff; }
+        .prod-table { margin-top:.5rem; }
+        .prod-table th { background:rgba(245,158,11,.12); }
+        .inline-form { display:inline; }
+        .status-select { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:3px; padding:.2rem .3rem; font-size:.8rem; cursor:pointer; }
+        .status-select:focus { border-color:var(--prod-accent); outline:none; }
+        .steps-cell { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+        .step-chip { display:inline-flex; align-items:center; gap:.25rem; background:rgba(255,255,255,.04); padding:.15rem .4rem; border-radius:3px; font-size:.8rem; }
+        .step-select { background:transparent; color:var(--text); border:none; font-size:.85rem; cursor:pointer; padding:0; width:1.6em; }
+        .step-select:focus { outline:none; }
+        .step-label { color:var(--text-muted); font-size:.75rem; }
+        .stage-name { font-weight:600; white-space:nowrap; }
+        .song-files { margin-top:.75rem; }
+        .song-files summary { cursor:pointer; color:var(--text-muted); font-size:.9rem; }
+        .song-files ul { list-style:none; padding:.5rem 0 0 1rem; }
+        .song-files li { display:flex; align-items:center; gap:.5rem; padding:.2rem 0; font-size:.85rem; flex-wrap:wrap; }
+        .file-type { background:rgba(245,158,11,.15); color:var(--prod-accent); padding:.1rem .4rem; border-radius:3px; font-size:.7rem; font-weight:600; text-transform:uppercase; }
+
+        /* Practice view styles */
+        .practice-header h2 { color:var(--prac-accent); }
+        .practice-card { background:var(--prac-surface); border:1px solid rgba(16,185,129,.15); border-radius:var(--radius); padding:1.25rem; margin-bottom:1.25rem; }
+        .practice-card-header { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem; }
+        .practice-card-header h3 { font-size:1.15rem; }
+        .practice-card-meta { display:flex; gap:.5rem; flex-wrap:wrap; }
+        .practice-table { margin-top:.5rem; }
+        .practice-table th { background:rgba(16,185,129,.12); }
+        .presets-cell { display:flex; flex-wrap:wrap; gap:.3rem; }
+        .preset-chip { background:rgba(16,185,129,.1); padding:.15rem .5rem; border-radius:3px; font-size:.8rem; }
+        .preset-chip code { color:var(--prac-accent); font-weight:600; margin-right:.25rem; }
+        .paths-cell { display:flex; flex-direction:column; gap:.2rem; }
+        .path-link { font-size:.8rem; color:var(--text-muted); text-decoration:none; }
+        .path-link:hover { color:var(--prac-accent); }
+        .path-link code { font-size:.75rem; }
+        .practice-files { margin-top:.75rem; }
+        .practice-files h4 { font-size:.9rem; color:var(--text-muted); margin-bottom:.5rem; }
+        .file-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:.5rem; }
+        .file-card { background:rgba(16,185,129,.06); border:1px solid rgba(16,185,129,.1); border-radius:var(--radius); padding:.6rem .8rem; font-size:.85rem; }
+        .file-type-badge { display:inline-block; background:rgba(16,185,129,.15); color:var(--prac-accent); padding:.1rem .4rem; border-radius:3px; font-size:.7rem; font-weight:600; text-transform:uppercase; margin-right:.3rem; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav>
+        <h1>Personal Music Browser</h1>
+        <ul class="nav-links">
+            <li><a href="/">Songs</a></li>
+            <li><a href="/albums">Albums</a></li>
+            <li><a href="/artists">Artists</a></li>
+            <li><a href="/instruments">Instruments</a></li>
+            <li><a href="/recordings">Recordings</a></li>
+            <li><a href="/bands">Bands</a></li>
+            <li class="nav-sep">│</li>
+            <li class="nav-prod"><a href="/production">🎛️ Production</a></li>
+            <li class="nav-prac"><a href="/practice">🎸 Practice</a></li>
+        </ul>
+    </nav>
+    {% block content %}{% endblock %}
+</div>
+</body>
+</html>

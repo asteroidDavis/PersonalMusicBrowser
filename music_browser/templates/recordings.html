@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Recordings — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Recordings</h2>
+</div>
+{% if recordings.is_empty() %}
+    <p class="empty">No recordings yet.</p>
+{% else %}
+    <table>
+        <thead>
+            <tr><th>Type</th><th>Song</th><th>Path</th><th>Instruments</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for r in recordings %}
+            <tr>
+                <td>{{ r.recording_type }}</td>
+                <td>{{ r.song_id }}</td>
+                <td>{% if r.path.is_empty() %}—{% else %}{{ r.path }}{% endif %}</td>
+                <td>{% if r.instrument_names.is_empty() %}—{% else %}{{ r.instrument_names }}{% endif %}</td>
+                <td class="actions">
+                    <form method="post" action="/recordings/{{ r.id }}/delete" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+{% endblock %}

@@ -2,6 +2,7 @@
 target/
 *.db
 *.sqlite3
+.env
 
 *settings.py
 

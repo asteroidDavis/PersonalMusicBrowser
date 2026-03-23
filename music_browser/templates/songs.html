@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Songs — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Songs</h2>
+    <a href="/songs/new" class="btn btn-primary">+ Add Song</a>
+</div>
+{% if songs.is_empty() %}
+    <p class="empty">No songs found. Add one to get started!</p>
+{% else %}
+    <p class="count">Found {{ songs.len() }} songs</p>
+    <table>
+        <thead>
+            <tr><th>Title</th><th>Album</th><th>Type</th><th>Sheet Music</th><th>Artists</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for s in songs %}
+            <tr>
+                <td>{{ s.title }}</td>
+                <td>{{ s.album_title }}</td>
+                <td>{{ s.song_type }}</td>
+                <td>{% if s.sheet_music.is_empty() %}—{% else %}{{ s.sheet_music }}{% endif %}</td>
+                <td>{% if s.artist_names.is_empty() %}—{% else %}{{ s.artist_names }}{% endif %}</td>
+                <td class="actions">
+                    <a href="/songs/{{ s.id }}/edit" class="btn btn-sm">Edit</a>
+                    <form method="post" action="/songs/{{ s.id }}/delete" style="display:inline">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+{% endblock %}

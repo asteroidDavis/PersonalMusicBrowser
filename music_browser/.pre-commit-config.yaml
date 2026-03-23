@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path music_browser/Cargo.toml -- --check
+        language: system
+        pass_filenames: false
+        files: \.rs$
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path music_browser/Cargo.toml -- -D warnings
+        language: system
+        pass_filenames: false
+        files: \.rs$
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --manifest-path music_browser/Cargo.toml
+        language: system
+        pass_filenames: false
+        files: \.(rs|sql|html)$
