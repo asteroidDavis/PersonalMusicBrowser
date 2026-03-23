@@ -187,6 +187,9 @@ cargo run --bin bulk-import -- markdown --file ../"Cover song setup CC, PC, and 
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Bass Song | None | None | None | PBASS_T10 | [score](https://example.com/bass) |
 ```
+**What it looks like**
+
+![bulkImporterInAction.png](bulkImporterInAction.png)
 
 ### From SQLite
 
