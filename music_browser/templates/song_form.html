@@ -64,7 +64,7 @@
         <label>Artists</label>
         {% for a in artists %}
             <label class="checkbox-label">
-                <input type="checkbox" name="artist_ids" value="{{ a.id }}" {% if a.selected %}checked{% endif %}>
+                <input type="checkbox" name="artist_ids[]" value="{{ a.id }}" {% if a.selected %}checked{% endif %}>
                 {{ a.name }}
             </label>
         {% endfor %}

@@ -982,6 +982,22 @@ pub async fn delete_production_stage(pool: &SqlitePool, id: i64) -> Result<(), s
 }
 
 // ============================================================================
+// Production overview — all songs with their stages (for dashboard)
+// ============================================================================
+
+pub async fn list_all_production_stages(
+    pool: &SqlitePool,
+) -> Result<Vec<(Song, Vec<ProductionStage>)>, sqlx::Error> {
+    let songs = list_songs(pool).await?;
+    let mut result = Vec::new();
+    for song in songs {
+        let stages = list_production_stages(pool, song.id).await?;
+        result.push((song, stages));
+    }
+    Ok(result)
+}
+
+// ============================================================================
 // Song files
 // ============================================================================
 

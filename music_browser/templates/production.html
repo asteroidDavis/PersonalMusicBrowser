@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Production Progress — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header production-header">
+    <h2>🎛️ Production Progress</h2>
+</div>
+
+<div class="legend">
+    <span>✅ Complete</span>
+    <span>🏁 Nearing</span>
+    <span>🔄 In Progress</span>
+    <span>∅ Not Started</span>
+    <span>🚫 Skipped</span>
+    <span>❤️‍🩹 Borked</span>
+    <span>📈 Exceptional</span>
+</div>
+
+{% if songs.is_empty() %}
+    <p class="empty">No songs yet. <a href="/songs/new" style="color:var(--accent)">Add one?</a></p>
+{% else %}
+
+{% for entry in songs %}
+<div class="prod-card">
+    <div class="prod-card-header">
+        <h3>
+            <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
+            {{ entry.title }}
+            {% if !entry.original_artist.is_empty() %}<span class="text-muted"> — {{ entry.original_artist }}</span>{% endif %}
+        </h3>
+        <div class="prod-card-meta">
+            {% if !entry.key.is_empty() %}<span class="meta-tag">🎵 {{ entry.key }}</span>{% endif %}
+            {% if !entry.bpm.is_empty() %}<span class="meta-tag">🥁 {{ entry.bpm }}</span>{% endif %}
+            {% if !entry.album_title.is_empty() %}<span class="meta-tag">💿 {{ entry.album_title }}</span>{% endif %}
+        </div>
+        <div class="prod-card-actions">
+            <a href="/production/songs/{{ entry.song_id }}/stages/new" class="btn btn-sm">+ Stage</a>
+            <a href="/production/songs/{{ entry.song_id }}/files/new" class="btn btn-sm">+ File</a>
+            <a href="/songs/{{ entry.song_id }}/edit" class="btn btn-sm">Edit Song</a>
+        </div>
+    </div>
+
+    {% if entry.stages.is_empty() %}
+        <p class="count" style="padding:.5rem 0">No production stages defined.
+            <a href="/production/songs/{{ entry.song_id }}/stages/new" style="color:var(--accent)">Add stages?</a>
+        </p>
+    {% else %}
+    <table class="prod-table">
+        <thead>
+            <tr>
+                <th>Stage</th>
+                <th>Status</th>
+                <th>Steps</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for stage in entry.stages %}
+            <tr>
+                <td class="stage-name">{{ stage.name }}</td>
+                <td class="status-cell">
+                    <form method="post" action="/production/stages/{{ stage.id }}/status" class="inline-form">
+                        <select name="status" onchange="this.form.submit()" class="status-select">
+                            <option value="not_started" {% if stage.status_str == "not_started" %}selected{% endif %}>∅ Not Started</option>
+                            <option value="skipped" {% if stage.status_str == "skipped" %}selected{% endif %}>🚫 Skipped</option>
+                            <option value="in_progress" {% if stage.status_str == "in_progress" %}selected{% endif %}>🔄 In Progress</option>
+                            <option value="nearing_completion" {% if stage.status_str == "nearing_completion" %}selected{% endif %}>🏁 Nearing</option>
+                            <option value="borked" {% if stage.status_str == "borked" %}selected{% endif %}>❤️‍🩹 Borked</option>
+                            <option value="complete" {% if stage.status_str == "complete" %}selected{% endif %}>✅ Complete</option>
+                            <option value="exceptional" {% if stage.status_str == "exceptional" %}selected{% endif %}>📈 Exceptional</option>
+                        </select>
+                    </form>
+                </td>
+                <td class="steps-cell">
+                    {% for step in stage.steps %}
+                        <span class="step-chip" title="{{ step.name }}{% if !step.instrument_name.is_empty() %} ({{ step.instrument_name }}){% endif %}{% if !step.notes.is_empty() %} — {{ step.notes }}{% endif %}">
+                            <form method="post" action="/production/steps/{{ step.id }}/status" class="inline-form">
+                                <select name="status" onchange="this.form.submit()" class="step-select" title="{{ step.name }}">
+                                    <option value="not_started" {% if step.status_str == "not_started" %}selected{% endif %}>∅</option>
+                                    <option value="skipped" {% if step.status_str == "skipped" %}selected{% endif %}>🚫</option>
+                                    <option value="in_progress" {% if step.status_str == "in_progress" %}selected{% endif %}>🔄</option>
+                                    <option value="nearing_completion" {% if step.status_str == "nearing_completion" %}selected{% endif %}>🏁</option>
+                                    <option value="borked" {% if step.status_str == "borked" %}selected{% endif %}>❤️‍🩹</option>
+                                    <option value="complete" {% if step.status_str == "complete" %}selected{% endif %}>✅</option>
+                                    <option value="exceptional" {% if step.status_str == "exceptional" %}selected{% endif %}>📈</option>
+                                </select>
+                            </form>
+                            <span class="step-label">{{ step.name }}</span>
+                        </span>
+                    {% endfor %}
+                    <a href="/production/stages/{{ stage.id }}/steps/new" class="btn btn-sm" style="font-size:.7rem;padding:.15rem .4rem">+ Step</a>
+                </td>
+                <td class="actions">
+                    <form method="post" action="/production/stages/{{ stage.id }}/delete">
+                        <button class="btn btn-danger btn-sm" onclick="return confirm('Delete stage?')">✕</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if !entry.files.is_empty() %}
+    <details class="song-files">
+        <summary>📁 Files ({{ entry.files.len() }})</summary>
+        <ul>
+        {% for f in entry.files %}
+            <li>
+                <span class="file-type">{{ f.file_type }}</span>
+                <code>{{ f.path }}</code>
+                {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
+                {% if !f.description.is_empty() %}<span class="text-muted"> — {{ f.description }}</span>{% endif %}
+                <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form">
+                    <button class="btn btn-danger btn-sm" onclick="return confirm('Delete file?')" style="font-size:.65rem;padding:.1rem .3rem">✕</button>
+                </form>
+            </li>
+        {% endfor %}
+        </ul>
+    </details>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% endif %}
+{% endblock %}

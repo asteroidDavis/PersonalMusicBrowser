@@ -11,7 +11,7 @@
         <label>Bands</label>
         {% for b in bands %}
             <label class="checkbox-label">
-                <input type="checkbox" name="band_ids" value="{{ b.id }}" {% if b.selected %}checked{% endif %}>
+                <input type="checkbox" name="band_ids[]" value="{{ b.id }}" {% if b.selected %}checked{% endif %}>
                 {{ b.name }}
             </label>
         {% endfor %}

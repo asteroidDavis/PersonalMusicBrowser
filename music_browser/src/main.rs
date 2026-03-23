@@ -1,10 +1,37 @@
-use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::dev::Payload;
+use actix_web::{web, App, FromRequest, HttpRequest, HttpResponse, HttpServer};
 use askama::Template;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use music_browser::db::models::*;
 use music_browser::db::queries;
+
+// ---------------------------------------------------------------------------
+// QsForm: a form extractor that uses serde_qs instead of serde_urlencoded.
+// This correctly handles repeated keys (checkbox arrays) and treats empty
+// strings as None for Option<T> fields.
+// ---------------------------------------------------------------------------
+
+pub struct QsForm<T>(pub T);
+
+impl<T: DeserializeOwned + 'static> FromRequest for QsForm<T> {
+    type Error = actix_web::Error;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Error>>>>;
+
+    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
+        let fut = web::Bytes::from_request(req, payload);
+        Box::pin(async move {
+            let bytes = fut.await?;
+            let qs_config = serde_qs::Config::new(5, false);
+            let value: T = qs_config
+                .deserialize_bytes(&bytes)
+                .map_err(|e| actix_web::error::ErrorBadRequest(format!("Parse error: {e}")))?;
+            Ok(QsForm(value))
+        })
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Template structs
@@ -129,6 +156,104 @@ struct BandFormTemplate {
 }
 
 // ---------------------------------------------------------------------------
+// Production & Practice view structs
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "production.html")]
+struct ProductionTemplate {
+    songs: Vec<ProductionSongView>,
+}
+
+struct ProductionSongView {
+    song_id: i64,
+    title: String,
+    song_type: String,
+    original_artist: String,
+    key: String,
+    bpm: String,
+    album_title: String,
+    stages: Vec<StageView>,
+    files: Vec<FileView>,
+}
+
+struct StageView {
+    id: i64,
+    name: String,
+    status_str: String,
+    steps: Vec<StepView>,
+}
+
+struct StepView {
+    id: i64,
+    name: String,
+    status_str: String,
+    instrument_name: String,
+    notes: String,
+}
+
+struct FileView {
+    id: i64,
+    file_type: String,
+    path: String,
+    instrument_name: String,
+    description: String,
+}
+
+#[derive(Template)]
+#[template(path = "practice.html")]
+struct PracticeTemplate {
+    songs: Vec<PracticeSongView>,
+}
+
+struct PracticeSongView {
+    song_id: i64,
+    title: String,
+    song_type: String,
+    original_artist: String,
+    key: String,
+    bpm: String,
+    score_url: String,
+    instruments: Vec<SongInstrumentView>,
+    files: Vec<FileView>,
+}
+
+struct SongInstrumentView {
+    instrument_name: String,
+    description: String,
+    score_url: String,
+    production_path: String,
+    mastering_path: String,
+    presets: Vec<PresetView>,
+}
+
+struct PresetView {
+    name: String,
+    preset_code: String,
+    description: String,
+}
+
+#[derive(Template)]
+#[template(path = "stage_form.html")]
+struct StageFormTemplate {
+    song_title: String,
+}
+
+#[derive(Template)]
+#[template(path = "step_form.html")]
+struct StepFormTemplate {
+    stage_name: String,
+    instruments: Vec<Instrument>,
+}
+
+#[derive(Template)]
+#[template(path = "song_file_form.html")]
+struct SongFileFormTemplate {
+    song_title: String,
+    instruments: Vec<Instrument>,
+}
+
+// ---------------------------------------------------------------------------
 // Form deserialization structs
 // ---------------------------------------------------------------------------
 
@@ -184,6 +309,41 @@ struct InstrumentFormData {
 #[derive(Deserialize)]
 struct BandFormData {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct StageFormData {
+    stage: String,
+    #[serde(default)]
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct StepFormData {
+    name: String,
+    #[serde(default)]
+    instrument_id: Option<i64>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    sort_order: Option<i32>,
+    #[serde(default)]
+    notes: String,
+}
+
+#[derive(Deserialize)]
+struct StatusFormData {
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct SongFileFormData {
+    file_type: String,
+    path: String,
+    #[serde(default)]
+    instrument_id: Option<i64>,
+    #[serde(default)]
+    description: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +416,9 @@ async fn song_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse
 
 async fn song_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<SongFormData>,
+    form: QsForm<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
     let st = SongType::parse(&form.song_type).unwrap_or(SongType::Song);
     let input = CreateSong {
         title: form.title.clone(),
@@ -334,8 +495,9 @@ async fn song_edit(
 async fn song_update(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
-    form: web::Form<SongFormData>,
+    form: QsForm<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
     let input = UpdateSong {
         id: path.into_inner(),
         title: form.title.clone(),
@@ -397,8 +559,9 @@ async fn album_new() -> actix_web::Result<HttpResponse> {
 
 async fn album_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<AlbumFormData>,
+    form: QsForm<AlbumFormData>,
 ) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
     let input = CreateAlbum {
         title: form.title.clone(),
         released: form.released.as_deref() == Some("true"),
@@ -473,8 +636,9 @@ async fn artist_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpRespon
 
 async fn artist_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<ArtistFormData>,
+    form: QsForm<ArtistFormData>,
 ) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
     let input = CreateArtist {
         name: form.name.clone(),
         band_ids: form.band_ids.clone(),
@@ -525,15 +689,15 @@ async fn instrument_new() -> actix_web::Result<HttpResponse> {
 
 async fn instrument_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<InstrumentFormData>,
+    form: QsForm<InstrumentFormData>,
 ) -> actix_web::Result<HttpResponse> {
-    let it = if form.instrument_type.is_empty() {
+    let it = if form.0.instrument_type.is_empty() {
         "other".to_string()
     } else {
-        form.instrument_type.clone()
+        form.0.instrument_type.clone()
     };
     let input = CreateInstrument {
-        name: form.name.clone(),
+        name: form.0.name.clone(),
         instrument_type: it,
     };
     queries::create_instrument(&pool, &input)
@@ -622,10 +786,10 @@ async fn band_new() -> actix_web::Result<HttpResponse> {
 
 async fn band_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<BandFormData>,
+    form: QsForm<BandFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let input = CreateBand {
-        name: form.name.clone(),
+        name: form.0.name.clone(),
     };
     queries::create_band(&pool, &input)
         .await
@@ -645,6 +809,402 @@ async fn band_delete(
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/bands"))
         .finish())
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — Production
+// ---------------------------------------------------------------------------
+
+fn format_bpm(lower: Option<i32>, upper: Option<i32>) -> String {
+    match (lower, upper) {
+        (Some(l), Some(u)) if l == u => format!("{l}"),
+        (Some(l), Some(u)) => format!("{l}–{u}"),
+        (Some(l), None) => format!("{l}"),
+        (None, Some(u)) => format!("{u}"),
+        _ => String::new(),
+    }
+}
+
+fn song_to_file_views(files: &[SongFile]) -> Vec<FileView> {
+    files
+        .iter()
+        .map(|f| FileView {
+            id: f.id,
+            file_type: f.file_type.clone(),
+            path: f.path.clone(),
+            instrument_name: f.instrument_name.clone(),
+            description: f.description.clone(),
+        })
+        .collect()
+}
+
+async fn production_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let data = queries::list_all_production_stages(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let mut songs = Vec::new();
+    for (song, stages) in data {
+        let files = queries::list_song_files(&pool, song.id)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+
+        songs.push(ProductionSongView {
+            song_id: song.id,
+            title: song.title,
+            song_type: song.song_type.to_string(),
+            original_artist: song.original_artist,
+            key: song.key,
+            bpm: format_bpm(song.bpm_lower, song.bpm_upper),
+            album_title: song.album_title,
+            stages: stages
+                .iter()
+                .map(|st| StageView {
+                    id: st.id,
+                    name: st.stage.clone(),
+                    status_str: st.status.as_str().to_string(),
+                    steps: st
+                        .steps
+                        .iter()
+                        .map(|sp| StepView {
+                            id: sp.id,
+                            name: sp.name.clone(),
+                            status_str: sp.status.as_str().to_string(),
+                            instrument_name: sp.instrument_name.clone(),
+                            notes: sp.notes.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            files: song_to_file_views(&files),
+        });
+    }
+
+    let body = ProductionTemplate { songs }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn stage_new(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    let song_id = path.into_inner();
+    let song = queries::get_song(&pool, song_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("Song not found"))?;
+
+    let body = StageFormTemplate {
+        song_title: song.title,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn stage_create(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<StageFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
+    let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
+    let input = CreateProductionStage {
+        song_id: path.into_inner(),
+        stage: form.stage,
+        status,
+    };
+    queries::create_production_stage(&pool, &input)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn stage_update_status(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<StatusFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
+    queries::update_production_stage_status(&pool, path.into_inner(), &status)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn stage_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_production_stage(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn step_new(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    let stage_id = path.into_inner();
+    let instruments = queries::list_instruments(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    // Fetch stage name for display
+    let stages_row = sqlx::query("SELECT stage FROM production_stages WHERE id = ?")
+        .bind(stage_id)
+        .fetch_optional(pool.get_ref())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let stage_name = stages_row
+        .map(|r| sqlx::Row::get::<String, _>(&r, "stage"))
+        .unwrap_or_default();
+
+    let body = StepFormTemplate {
+        stage_name,
+        instruments,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn step_create(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<StepFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
+    let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
+    let input = CreateProductionStep {
+        stage_id: path.into_inner(),
+        instrument_id: form.instrument_id,
+        name: form.name,
+        status,
+        sort_order: form.sort_order.unwrap_or(0),
+        notes: form.notes,
+    };
+    queries::create_production_step(&pool, &input)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn step_update_status(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<StatusFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
+    queries::update_production_step_status(&pool, path.into_inner(), &status)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn song_file_new(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    let song_id = path.into_inner();
+    let song = queries::get_song(&pool, song_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("Song not found"))?;
+    let instruments = queries::list_instruments(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let body = SongFileFormTemplate {
+        song_title: song.title,
+        instruments,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn song_file_create(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<SongFileFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
+    let input = CreateSongFile {
+        song_id: path.into_inner(),
+        file_type: form.file_type,
+        path: form.path,
+        instrument_id: form.instrument_id,
+        description: form.description,
+    };
+    queries::create_song_file(&pool, &input)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+async fn song_file_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_song_file(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — Practice
+// ---------------------------------------------------------------------------
+
+async fn practice_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let all_songs = queries::list_songs(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let mut songs = Vec::new();
+    for song in all_songs {
+        let instruments = queries::list_song_instruments(&pool, song.id)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        let files = queries::list_song_files(&pool, song.id)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+
+        songs.push(PracticeSongView {
+            song_id: song.id,
+            title: song.title,
+            song_type: song.song_type.to_string(),
+            original_artist: song.original_artist,
+            key: song.key,
+            bpm: format_bpm(song.bpm_lower, song.bpm_upper),
+            score_url: song.score_url,
+            instruments: instruments
+                .iter()
+                .map(|si| SongInstrumentView {
+                    instrument_name: si.instrument_name.clone(),
+                    description: si.description.clone(),
+                    score_url: si.score_url.clone(),
+                    production_path: si.production_path.clone(),
+                    mastering_path: si.mastering_path.clone(),
+                    presets: si
+                        .presets
+                        .iter()
+                        .map(|p| PresetView {
+                            name: p.name.clone(),
+                            preset_code: p.preset_code.clone(),
+                            description: p.description.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            files: song_to_file_views(&files),
+        });
+    }
+
+    let body = PracticeTemplate { songs }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+// ---------------------------------------------------------------------------
+// App configuration (shared between main and tests)
+// ---------------------------------------------------------------------------
+
+pub fn configure_app(cfg: &mut web::ServiceConfig) {
+    cfg
+        // Songs
+        .route("/", web::get().to(song_list))
+        .route("/songs/new", web::get().to(song_new))
+        .route("/songs/new", web::post().to(song_create))
+        .route("/songs/{id}/edit", web::get().to(song_edit))
+        .route("/songs/{id}/edit", web::post().to(song_update))
+        .route("/songs/{id}/delete", web::post().to(song_delete))
+        // Albums
+        .route("/albums", web::get().to(album_list))
+        .route("/albums/new", web::get().to(album_new))
+        .route("/albums/new", web::post().to(album_create))
+        .route("/albums/{id}/delete", web::post().to(album_delete))
+        // Artists
+        .route("/artists", web::get().to(artist_list))
+        .route("/artists/new", web::get().to(artist_new))
+        .route("/artists/new", web::post().to(artist_create))
+        .route("/artists/{id}/delete", web::post().to(artist_delete))
+        // Instruments
+        .route("/instruments", web::get().to(instrument_list))
+        .route("/instruments/new", web::get().to(instrument_new))
+        .route("/instruments/new", web::post().to(instrument_create))
+        .route(
+            "/instruments/{id}/delete",
+            web::post().to(instrument_delete),
+        )
+        // Recordings
+        .route("/recordings", web::get().to(recording_list))
+        .route("/recordings/{id}/delete", web::post().to(recording_delete))
+        // Bands
+        .route("/bands", web::get().to(band_list))
+        .route("/bands/new", web::get().to(band_new))
+        .route("/bands/new", web::post().to(band_create))
+        .route("/bands/{id}/delete", web::post().to(band_delete))
+        // Production
+        .route("/production", web::get().to(production_list))
+        .route(
+            "/production/songs/{id}/stages/new",
+            web::get().to(stage_new),
+        )
+        .route(
+            "/production/songs/{id}/stages/new",
+            web::post().to(stage_create),
+        )
+        .route(
+            "/production/stages/{id}/status",
+            web::post().to(stage_update_status),
+        )
+        .route(
+            "/production/stages/{id}/delete",
+            web::post().to(stage_delete),
+        )
+        .route("/production/stages/{id}/steps/new", web::get().to(step_new))
+        .route(
+            "/production/stages/{id}/steps/new",
+            web::post().to(step_create),
+        )
+        .route(
+            "/production/steps/{id}/status",
+            web::post().to(step_update_status),
+        )
+        .route(
+            "/production/songs/{id}/files/new",
+            web::get().to(song_file_new),
+        )
+        .route(
+            "/production/songs/{id}/files/new",
+            web::post().to(song_file_create),
+        )
+        .route(
+            "/production/files/{id}/delete",
+            web::post().to(song_file_delete),
+        )
+        // Practice
+        .route("/practice", web::get().to(practice_list));
 }
 
 // ---------------------------------------------------------------------------
@@ -671,39 +1231,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(pool_data.clone())
-            // Songs
-            .route("/", web::get().to(song_list))
-            .route("/songs/new", web::get().to(song_new))
-            .route("/songs/new", web::post().to(song_create))
-            .route("/songs/{id}/edit", web::get().to(song_edit))
-            .route("/songs/{id}/edit", web::post().to(song_update))
-            .route("/songs/{id}/delete", web::post().to(song_delete))
-            // Albums
-            .route("/albums", web::get().to(album_list))
-            .route("/albums/new", web::get().to(album_new))
-            .route("/albums/new", web::post().to(album_create))
-            .route("/albums/{id}/delete", web::post().to(album_delete))
-            // Artists
-            .route("/artists", web::get().to(artist_list))
-            .route("/artists/new", web::get().to(artist_new))
-            .route("/artists/new", web::post().to(artist_create))
-            .route("/artists/{id}/delete", web::post().to(artist_delete))
-            // Instruments
-            .route("/instruments", web::get().to(instrument_list))
-            .route("/instruments/new", web::get().to(instrument_new))
-            .route("/instruments/new", web::post().to(instrument_create))
-            .route(
-                "/instruments/{id}/delete",
-                web::post().to(instrument_delete),
-            )
-            // Recordings
-            .route("/recordings", web::get().to(recording_list))
-            .route("/recordings/{id}/delete", web::post().to(recording_delete))
-            // Bands
-            .route("/bands", web::get().to(band_list))
-            .route("/bands/new", web::get().to(band_new))
-            .route("/bands/new", web::post().to(band_create))
-            .route("/bands/{id}/delete", web::post().to(band_delete))
+            .configure(configure_app)
     })
     .bind(&bind)?
     .run()

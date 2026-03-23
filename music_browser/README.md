@@ -1,7 +1,9 @@
 # Personal Music Browser
 
-A lightweight music production planning app built with **Rust**, **Actix-web**, **Askama** templates, and **SQLite** (via SQLx).
+[![CI](https://github.com/asteroidDavis/PersonalMusicBrowser/actions/workflows/ci.yml/badge.svg)](https://github.com/asteroidDavis/PersonalMusicBrowser/actions/workflows/ci.yml)
 
+A lightweight music production planning app built with **Rust**, **Actix-web**, **Askama** templates, and **SQLite** (via SQLx).
+![Songs screen.png](Songs%20screen.png)
 ## Model Diagram
 
 ```
@@ -100,7 +102,7 @@ sqlx database create
 sqlx migrate run --source ./migrations
 
 # Build and run
-cargo run
+cargo run --bin music-browser
 # App is at http://127.0.0.1:3000
 ```
 

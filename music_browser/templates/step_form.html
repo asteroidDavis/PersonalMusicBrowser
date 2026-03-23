@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Add Production Step — Personal Music Browser{% endblock %}
+{% block content %}
+<h2>Add Step to "{{ stage_name }}"</h2>
+<form class="form" method="post">
+    <div class="form-group">
+        <label for="name">Step Name</label>
+        <input type="text" id="name" name="name" required placeholder="e.g. trackDemo, automatedNoteDetection, sight read">
+    </div>
+    <div class="form-group">
+        <label for="instrument_id">Instrument (optional)</label>
+        <select id="instrument_id" name="instrument_id">
+            <option value="">— None —</option>
+            {% for i in instruments %}
+                <option value="{{ i.id }}">{{ i.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="status">Initial Status</label>
+        <select id="status" name="status">
+            <option value="not_started">∅ Not Started</option>
+            <option value="in_progress">🔄 In Progress</option>
+            <option value="nearing_completion">🏁 Nearing Completion</option>
+            <option value="complete">✅ Complete</option>
+            <option value="skipped">🚫 Skipped</option>
+            <option value="borked">❤️‍🩹 Borked</option>
+            <option value="exceptional">📈 Exceptional</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="sort_order">Sort Order</label>
+        <input type="number" id="sort_order" name="sort_order" value="0">
+    </div>
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <input type="text" id="notes" name="notes">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/production" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}
