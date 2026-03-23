@@ -189,7 +189,7 @@ cargo run --bin bulk-import -- markdown --file ../"Cover song setup CC, PC, and 
 ```
 **What it looks like**
 
-![bulkImporterInAction.png](bulkImporterInAction.png)
+![bulkImporterInAction.png](bulkImportExample.png)
 
 ### From SQLite
 
