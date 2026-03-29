@@ -3,22 +3,40 @@
 {% block content %}
 <h2>Add File for "{{ song_title }}"</h2>
 <form class="form" method="post">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
     <div class="form-group">
         <label for="file_type">File Type</label>
         <select id="file_type" name="file_type" required>
-            <option value="daw-project">DAW Project</option>
-            <option value="backing-track">Backing Track</option>
-            <option value="stem">Stem</option>
-            <option value="sheet-music">Sheet Music</option>
-            <option value="midi">MIDI</option>
-            <option value="audio">Audio</option>
-            <option value="video">Video</option>
+            <optgroup label="Projects">
+                <option value="daw_project">DAW Project (Cubase, GarageBand, Audacity)</option>
+                <option value="musicxml">MusicXML (MuseScore interchange)</option>
+                <option value="midi">MIDI</option>
+            </optgroup>
+            <optgroup label="Scores &amp; Text">
+                <option value="sheet_music">Sheet Music</option>
+                <option value="chord_sheet">Chord Sheet</option>
+                <option value="lead_sheet">Lead Sheet</option>
+                <option value="lyrics">Lyrics</option>
+                <option value="notes_text">Notes (text)</option>
+                <option value="notes_pdf">Notes (PDF)</option>
+                <option value="notes_image">Notes (image)</option>
+            </optgroup>
+            <optgroup label="Audio &amp; Video">
+                <option value="audio_export">Audio Export</option>
+                <option value="stem">Stem</option>
+                <option value="mix">Mix</option>
+                <option value="master">Master</option>
+                <option value="backing_track">Backing Track</option>
+                <option value="demo">Demo</option>
+                <option value="video">Video</option>
+            </optgroup>
             <option value="other">Other</option>
         </select>
     </div>
     <div class="form-group">
-        <label for="path">File Path</label>
-        <input type="text" id="path" name="path" required placeholder="/path/to/project.als">
+        <label for="path">File Path or Cloud URL</label>
+        <input type="text" id="path" name="path" required placeholder="https://onedrive.live.com/... or /local/path/to/project.cpr">
+        <span class="text-muted" style="font-size:.85em">Local paths, OneDrive URLs, or any cloud storage link</span>
     </div>
     <div class="form-group">
         <label for="instrument_id">Instrument (optional)</label>
