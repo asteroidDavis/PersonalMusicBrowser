@@ -93,6 +93,9 @@ pub struct Song {
     pub scores_folder: String,
     pub export_folder: String,
     pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artists: Vec<Artist>,
 }
 
@@ -360,6 +363,9 @@ pub struct CreateSong {
     pub scores_folder: String,
     pub export_folder: String,
     pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
 }
 
@@ -379,6 +385,9 @@ pub struct UpdateSong {
     pub scores_folder: String,
     pub export_folder: String,
     pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
 }
 
@@ -714,4 +723,50 @@ pub struct CreateScheduleItem {
     pub duration_minutes: i32,
     pub sort_order: i32,
     pub notes: String,
+}
+
+// ============================================================================
+// Live sets — ordered groupings for live performance or album practice
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveSet {
+    pub id: i64,
+    pub name: String,
+    pub set_type: String,
+    pub description: String,
+    pub target_duration_seconds: i32,
+    pub created_at: String,
+    pub songs: Vec<LiveSetSong>,
+    pub actual_duration_seconds: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveSetSong {
+    pub id: i64,
+    pub set_id: i64,
+    pub song_id: i64,
+    pub song_title: String,
+    pub sort_order: i32,
+    pub backing_track_path: String,
+    pub duration_seconds: i32,
+    pub transition_notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLiveSet {
+    pub name: String,
+    pub set_type: String,
+    pub description: String,
+    pub target_duration_seconds: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLiveSetSong {
+    pub set_id: i64,
+    pub song_id: i64,
+    pub sort_order: i32,
+    pub backing_track_path: String,
+    pub duration_seconds: i32,
+    pub transition_notes: String,
 }

@@ -1779,6 +1779,9 @@ async fn test_song_new_fields_persist() {
             scores_folder: "/scores/full".to_string(),
             export_folder: "/export/full".to_string(),
             musicxml_path: "/scores/full/sheet.xml".to_string(),
+            practice_project_path: String::new(),
+            time_signature: "4/4".to_string(),
+            practice_priority: 0,
             artist_ids: vec![],
         },
     )
@@ -1867,5 +1870,401 @@ async fn test_schedule_event_status_constraint() {
     assert!(
         bad.is_err(),
         "Expected CHECK constraint to reject invalid schedule event status"
+    );
+}
+
+// ============================================================================
+// Practice fields, priority, live sets tests (migration 0004)
+// ============================================================================
+
+#[tokio::test]
+async fn test_practice_fields_persist() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::{CreateSong, SongType, WorkflowState};
+    use music_browser::db::queries;
+
+    let id = queries::create_song(
+        &pool,
+        &CreateSong {
+            title: "Practice Song".to_string(),
+            album_id: None,
+            sheet_music: String::new(),
+            lyrics: String::new(),
+            song_type: SongType::Original,
+            key: "Cm".to_string(),
+            bpm_lower: Some(90),
+            bpm_upper: None,
+            original_artist: String::new(),
+            score_url: String::new(),
+            description: String::new(),
+            workflow_state: WorkflowState::Learning,
+            scores_folder: String::new(),
+            export_folder: String::new(),
+            musicxml_path: String::new(),
+            practice_project_path: "/Projects/song.band".to_string(),
+            time_signature: "3/4".to_string(),
+            practice_priority: 2,
+            artist_ids: vec![],
+        },
+    )
+    .await
+    .unwrap();
+
+    let song = queries::get_song(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        song.practice_project_path, "/Projects/song.band",
+        "practice_project_path mismatch: {}",
+        song.practice_project_path
+    );
+    assert_eq!(
+        song.time_signature, "3/4",
+        "time_signature mismatch: {}",
+        song.time_signature
+    );
+    assert_eq!(
+        song.practice_priority, 2,
+        "practice_priority mismatch: {}",
+        song.practice_priority
+    );
+}
+
+#[tokio::test]
+async fn test_practice_priority_constraint() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "Priority Song", "original").await;
+
+    // Valid priority 0-5 should work
+    let ok = sqlx::query("UPDATE songs SET practice_priority = ? WHERE id = ?")
+        .bind(5)
+        .bind(song_id)
+        .execute(&pool)
+        .await;
+    assert!(
+        ok.is_ok(),
+        "Expected priority 5 to be accepted, got: {:?}",
+        ok.err()
+    );
+
+    // Invalid priority 6 should fail CHECK
+    let bad = sqlx::query("UPDATE songs SET practice_priority = ? WHERE id = ?")
+        .bind(6)
+        .bind(song_id)
+        .execute(&pool)
+        .await;
+    assert!(
+        bad.is_err(),
+        "Expected CHECK constraint to reject practice_priority=6"
+    );
+
+    // Negative should fail CHECK
+    let neg = sqlx::query("UPDATE songs SET practice_priority = ? WHERE id = ?")
+        .bind(-1)
+        .bind(song_id)
+        .execute(&pool)
+        .await;
+    assert!(
+        neg.is_err(),
+        "Expected CHECK constraint to reject practice_priority=-1"
+    );
+}
+
+#[tokio::test]
+async fn test_practice_priority_update() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::queries;
+
+    let song_id = insert_song(&pool, "Prio Song", "cover").await;
+
+    // Default priority should be 0
+    let song = queries::get_song(&pool, song_id).await.unwrap().unwrap();
+    assert_eq!(
+        song.practice_priority, 0,
+        "Default priority should be 0, got {}",
+        song.practice_priority
+    );
+
+    // Update to priority 3
+    queries::update_practice_priority(&pool, song_id, 3)
+        .await
+        .unwrap();
+    let song = queries::get_song(&pool, song_id).await.unwrap().unwrap();
+    assert_eq!(
+        song.practice_priority, 3,
+        "Priority should be 3 after update, got {}",
+        song.practice_priority
+    );
+}
+
+#[tokio::test]
+async fn test_live_set_crud() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::CreateLiveSet;
+    use music_browser::db::queries;
+
+    // Create a live set
+    let set_id = queries::create_live_set(
+        &pool,
+        &CreateLiveSet {
+            name: "Friday Gig".to_string(),
+            set_type: "live".to_string(),
+            description: "Opening set".to_string(),
+            target_duration_seconds: 2700,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(set_id > 0, "Expected positive set id, got {set_id}");
+
+    // List sets
+    let sets = queries::list_live_sets(&pool).await.unwrap();
+    assert_eq!(sets.len(), 1, "Expected 1 set, got {}", sets.len());
+    assert_eq!(sets[0].name, "Friday Gig");
+    assert_eq!(sets[0].set_type, "live");
+    assert_eq!(sets[0].target_duration_seconds, 2700);
+    assert!(
+        sets[0].songs.is_empty(),
+        "Expected 0 songs in new set, got {}",
+        sets[0].songs.len()
+    );
+
+    // Get by id
+    let got = queries::get_live_set(&pool, set_id).await.unwrap();
+    assert!(got.is_some(), "Expected to find set by id");
+    assert_eq!(got.unwrap().name, "Friday Gig");
+
+    // Delete
+    queries::delete_live_set(&pool, set_id).await.unwrap();
+    let after = queries::list_live_sets(&pool).await.unwrap();
+    assert!(
+        after.is_empty(),
+        "Expected 0 sets after delete, got {}",
+        after.len()
+    );
+}
+
+#[tokio::test]
+async fn test_live_set_songs() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::{CreateLiveSet, CreateLiveSetSong};
+    use music_browser::db::queries;
+
+    let s1 = insert_song(&pool, "Opener", "original").await;
+    let s2 = insert_song(&pool, "Closer", "cover").await;
+
+    let set_id = queries::create_live_set(
+        &pool,
+        &CreateLiveSet {
+            name: "Test Set".to_string(),
+            set_type: "live".to_string(),
+            description: String::new(),
+            target_duration_seconds: 1800,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Add songs
+    let ls1 = queries::add_song_to_set(
+        &pool,
+        &CreateLiveSetSong {
+            set_id,
+            song_id: s1,
+            sort_order: 0,
+            backing_track_path: "/tracks/opener.wav".to_string(),
+            duration_seconds: 240,
+            transition_notes: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let ls2 = queries::add_song_to_set(
+        &pool,
+        &CreateLiveSetSong {
+            set_id,
+            song_id: s2,
+            sort_order: 1,
+            backing_track_path: "/tracks/closer.wav".to_string(),
+            duration_seconds: 300,
+            transition_notes: "key change to Am".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Verify set contents
+    let sets = queries::list_live_sets(&pool).await.unwrap();
+    assert_eq!(sets.len(), 1);
+    let set = &sets[0];
+    assert_eq!(
+        set.songs.len(),
+        2,
+        "Expected 2 songs in set, got {}",
+        set.songs.len()
+    );
+    assert_eq!(set.songs[0].song_title, "Opener");
+    assert_eq!(set.songs[1].song_title, "Closer");
+    assert_eq!(set.songs[1].backing_track_path, "/tracks/closer.wav");
+    assert_eq!(set.songs[1].transition_notes, "key change to Am");
+
+    // Actual duration = 240 + 300 = 540
+    assert_eq!(
+        set.actual_duration_seconds, 540,
+        "Expected actual_duration=540, got {}",
+        set.actual_duration_seconds
+    );
+
+    // Remove first song
+    queries::remove_song_from_set(&pool, ls1).await.unwrap();
+    let sets = queries::list_live_sets(&pool).await.unwrap();
+    assert_eq!(
+        sets[0].songs.len(),
+        1,
+        "Expected 1 song after removal, got {}",
+        sets[0].songs.len()
+    );
+    assert_eq!(sets[0].songs[0].song_title, "Closer");
+
+    // Duplicate song in same set should be ignored (UNIQUE constraint + OR IGNORE)
+    let dup = queries::add_song_to_set(
+        &pool,
+        &CreateLiveSetSong {
+            set_id,
+            song_id: s2,
+            sort_order: 2,
+            backing_track_path: String::new(),
+            duration_seconds: 0,
+            transition_notes: String::new(),
+        },
+    )
+    .await;
+    assert!(dup.is_ok(), "Duplicate add should not error with OR IGNORE");
+
+    // Should still be 1 song (the duplicate was ignored)
+    let sets = queries::list_live_sets(&pool).await.unwrap();
+    assert_eq!(
+        sets[0].songs.len(),
+        1,
+        "Expected still 1 song after dup add, got {}",
+        sets[0].songs.len()
+    );
+
+    // Delete set cascades songs
+    queries::delete_live_set(&pool, set_id).await.unwrap();
+    // Verify the live_set_songs row is gone
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM live_set_songs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        remaining, 0,
+        "Expected 0 live_set_songs after cascade delete, got {remaining}"
+    );
+
+    // But songs themselves are not deleted
+    let _s = queries::get_song(&pool, ls2).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_live_set_type_constraint() {
+    let (pool, _tmp) = setup_pool().await;
+
+    // Valid types: live, album_practice, rehearsal
+    let ok = sqlx::query("INSERT INTO live_sets (name, set_type) VALUES (?, ?)")
+        .bind("Test")
+        .bind("album_practice")
+        .execute(&pool)
+        .await;
+    assert!(
+        ok.is_ok(),
+        "Expected 'album_practice' to be accepted, got: {:?}",
+        ok.err()
+    );
+
+    // Invalid type
+    let bad = sqlx::query("INSERT INTO live_sets (name, set_type) VALUES (?, ?)")
+        .bind("Bad")
+        .bind("concert")
+        .execute(&pool)
+        .await;
+    assert!(
+        bad.is_err(),
+        "Expected CHECK constraint to reject set_type='concert'"
+    );
+}
+
+#[tokio::test]
+async fn test_priority_weighted_schedule_generation() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::WorkflowState;
+    use music_browser::db::queries;
+
+    // Create songs with different priorities
+    let s1 = insert_song(&pool, "High Priority", "original").await;
+    let s2 = insert_song(&pool, "Low Priority", "cover").await;
+    let s3 = insert_song(&pool, "Unranked", "song").await;
+
+    queries::update_workflow_state(&pool, s1, &WorkflowState::Learning)
+        .await
+        .unwrap();
+    queries::update_workflow_state(&pool, s2, &WorkflowState::Learning)
+        .await
+        .unwrap();
+    queries::update_workflow_state(&pool, s3, &WorkflowState::Learning)
+        .await
+        .unwrap();
+
+    queries::update_practice_priority(&pool, s1, 1)
+        .await
+        .unwrap();
+    queries::update_practice_priority(&pool, s2, 5)
+        .await
+        .unwrap();
+    // s3 stays at 0 (unranked)
+
+    // Create an exercise
+    use music_browser::db::models::CreatePracticeExercise;
+    queries::create_exercise(
+        &pool,
+        &CreatePracticeExercise {
+            instrument_id: None,
+            name: "Warmup scales".to_string(),
+            category: "scales".to_string(),
+            description: String::new(),
+            source: String::new(),
+            sort_order: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Generate 1 day schedule
+    let event_ids = queries::generate_schedule(&pool, "2026-05-01", 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        event_ids.len(),
+        1,
+        "Expected 1 event, got {}",
+        event_ids.len()
+    );
+
+    // Verify events were created and contain items
+    let events = queries::list_schedule_events(&pool).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(
+        !events[0].items.is_empty(),
+        "Expected items in generated event, got 0"
+    );
+
+    // The high-priority song (priority 1, weight 5) should appear in the schedule
+    let has_high = events[0]
+        .items
+        .iter()
+        .any(|i| i.title.contains("High Priority"));
+    assert!(
+        has_high,
+        "Expected high-priority song in schedule items: {:?}",
+        events[0].items.iter().map(|i| &i.title).collect::<Vec<_>>()
     );
 }

@@ -213,6 +213,10 @@ struct PracticeSongView {
     original_artist: String,
     key: String,
     bpm: String,
+    time_signature: String,
+    practice_project_path: String,
+    practice_priority: i32,
+    workflow_state: String,
     score_url: String,
     instruments: Vec<SongInstrumentView>,
     files: Vec<FileView>,
@@ -436,6 +440,9 @@ async fn song_create(
         scores_folder: String::new(),
         export_folder: String::new(),
         musicxml_path: String::new(),
+        practice_project_path: String::new(),
+        time_signature: "4/4".to_string(),
+        practice_priority: 0,
         artist_ids: form.artist_ids.clone(),
     };
     queries::create_song(&pool, &input)
@@ -517,6 +524,9 @@ async fn song_update(
         scores_folder: String::new(),
         export_folder: String::new(),
         musicxml_path: String::new(),
+        practice_project_path: String::new(),
+        time_signature: "4/4".to_string(),
+        practice_priority: 0,
         artist_ids: form.artist_ids.clone(),
     };
     queries::update_song(&pool, &input)
@@ -1100,8 +1110,12 @@ async fn practice_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpRes
             title: song.title,
             song_type: song.song_type.to_string(),
             original_artist: song.original_artist,
-            key: song.key,
+            key: song.key.clone(),
             bpm: format_bpm(song.bpm_lower, song.bpm_upper),
+            time_signature: song.time_signature,
+            practice_project_path: song.practice_project_path,
+            practice_priority: song.practice_priority,
+            workflow_state: song.workflow_state.label().to_string(),
             score_url: song.score_url,
             instruments: instruments
                 .iter()
@@ -1575,6 +1589,153 @@ async fn schedule_ics_export(pool: web::Data<SqlitePool>) -> actix_web::Result<H
 }
 
 // ---------------------------------------------------------------------------
+// Handlers — Live Sets
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "sets.html")]
+struct SetsTemplate {
+    sets: Vec<LiveSet>,
+    songs: Vec<Song>,
+}
+
+#[derive(Template)]
+#[template(path = "set_form.html")]
+struct SetFormTemplate {}
+
+#[derive(Deserialize)]
+struct SetFormData {
+    name: String,
+    #[serde(default)]
+    set_type: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    target_duration_seconds: i32,
+}
+
+#[derive(Deserialize)]
+struct SetSongFormData {
+    song_id: i64,
+    #[serde(default)]
+    sort_order: i32,
+    #[serde(default)]
+    backing_track_path: String,
+    #[serde(default)]
+    duration_seconds: i32,
+    #[serde(default)]
+    transition_notes: String,
+}
+
+#[derive(Deserialize)]
+struct PriorityFormData {
+    priority: i32,
+}
+
+async fn set_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let sets = queries::list_live_sets(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let songs = queries::list_songs(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = SetsTemplate { sets, songs }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn set_new(_pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let body = SetFormTemplate {}
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn set_create(
+    pool: web::Data<SqlitePool>,
+    form: QsForm<SetFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
+    let input = CreateLiveSet {
+        name: form.name,
+        set_type: if form.set_type.is_empty() {
+            "live".to_string()
+        } else {
+            form.set_type
+        },
+        description: form.description,
+        target_duration_seconds: form.target_duration_seconds,
+    };
+    queries::create_live_set(&pool, &input)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/sets"))
+        .finish())
+}
+
+async fn set_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_live_set(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/sets"))
+        .finish())
+}
+
+async fn set_add_song(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<SetSongFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let form = form.0;
+    let input = CreateLiveSetSong {
+        set_id: path.into_inner(),
+        song_id: form.song_id,
+        sort_order: form.sort_order,
+        backing_track_path: form.backing_track_path,
+        duration_seconds: form.duration_seconds,
+        transition_notes: form.transition_notes,
+    };
+    queries::add_song_to_set(&pool, &input)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/sets"))
+        .finish())
+}
+
+async fn set_remove_song(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::remove_song_from_set(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/sets"))
+        .finish())
+}
+
+async fn practice_priority_update(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<PriorityFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let priority = form.0.priority.clamp(0, 5);
+    queries::update_practice_priority(&pool, path.into_inner(), priority)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/practice"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
 // App configuration (shared between main and tests)
 // ---------------------------------------------------------------------------
 
@@ -1689,7 +1850,19 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
             "/schedule/events/{id}/delete",
             web::post().to(schedule_event_delete),
         )
-        .route("/schedule/export.ics", web::get().to(schedule_ics_export));
+        .route("/schedule/export.ics", web::get().to(schedule_ics_export))
+        // Live Sets
+        .route("/sets", web::get().to(set_list))
+        .route("/sets/new", web::get().to(set_new))
+        .route("/sets/new", web::post().to(set_create))
+        .route("/sets/{id}/delete", web::post().to(set_delete))
+        .route("/sets/{id}/songs", web::post().to(set_add_song))
+        .route("/sets/songs/{id}/remove", web::post().to(set_remove_song))
+        // Practice priority
+        .route(
+            "/practice/songs/{id}/priority",
+            web::post().to(practice_priority_update),
+        );
 }
 
 // ---------------------------------------------------------------------------
