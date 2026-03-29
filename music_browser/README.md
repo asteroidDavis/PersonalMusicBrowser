@@ -92,6 +92,7 @@ A lightweight music production planning app built with **Rust**, **Actix-web**, 
   ```
 
 ## Quick Start
+with an empty database
 
 ```bash
 cd music_browser
@@ -140,10 +141,20 @@ sqlx migrate run --source ./migrations
 
 To add a new migration:
 
-```bash
+new database
+```bash 
 sqlx migrate add -r <description> --source ./migrations
 # Edit the generated .sql file, then run:
 sqlx migrate run --source ./migrations
+```
+
+update existing database
+```
+BACKUP_DEST="TODO/ApplicationBackups/"
+LATEST_MIGRATION=$(ls migrations/*.sql | tail -1 | grep -o '[0-9]\+')
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+cp ./music_browser.db ${BACKUP_DEST}/music_browser_${LATEST_MIGRATION}_${TIMESTAMP}.db 
+sqlx migrate run --source ./migrations --database-url sqlite:music_browser.db
 ```
 
 ## Bulk Import

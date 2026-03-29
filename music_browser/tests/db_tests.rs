@@ -1,3 +1,4 @@
+use music_browser::db::queries;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
@@ -992,16 +993,19 @@ async fn test_production_stage_constraint() {
 
     let song_id = insert_song(&pool, "CS", "song").await;
 
+    // Custom stage names are now allowed (length <= 128)
+    // Only overly long stages (>128 chars) are rejected
+    let long_stage_name = "x".repeat(129);
     let bad_stage =
         sqlx::query("INSERT INTO production_stages (song_id, stage, status) VALUES (?, ?, ?)")
             .bind(song_id)
-            .bind("invalid_stage")
+            .bind(long_stage_name)
             .bind("not_started")
             .execute(&pool)
             .await;
     assert!(
         bad_stage.is_err(),
-        "Expected CHECK constraint to reject invalid stage"
+        "Expected CHECK constraint to reject stage name >128 chars"
     );
 
     let bad_status =
@@ -1278,4 +1282,176 @@ async fn test_song_instruments_cascade_on_song_delete() {
         "Expected song_instruments to be cascade-deleted, got {}",
         si_rows.len()
     );
+}
+
+// ===========================================================================
+// Auto-add stages and steps
+// ===========================================================================
+
+#[tokio::test]
+async fn test_auto_add_stages_creates_all_7() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "Stages Song", "song").await;
+
+    let ids = queries::auto_add_stages(&pool, song_id).await.unwrap();
+    assert_eq!(ids.len(), 7, "Expected 7 stages created, got {}", ids.len());
+
+    let rows = sqlx::query("SELECT stage FROM production_stages WHERE song_id = ?")
+        .bind(song_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let stages: Vec<String> = rows.iter().map(|r| r.get("stage")).collect();
+    assert!(
+        stages.contains(&"writing".to_string()),
+        "Expected writing stage"
+    );
+    assert!(
+        stages.contains(&"composition".to_string()),
+        "Expected composition stage"
+    );
+    assert!(
+        stages.contains(&"tracking".to_string()),
+        "Expected tracking stage"
+    );
+    assert!(
+        stages.contains(&"mixing".to_string()),
+        "Expected mixing stage"
+    );
+    assert!(
+        stages.contains(&"mastering".to_string()),
+        "Expected mastering stage"
+    );
+    assert!(
+        stages.contains(&"publishing".to_string()),
+        "Expected publishing stage"
+    );
+    assert!(
+        stages.contains(&"performing".to_string()),
+        "Expected performing stage"
+    );
+}
+
+#[tokio::test]
+async fn test_auto_add_steps_for_tracking() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "Tracking Song", "song").await;
+
+    let stage_ids: Vec<i64> = queries::auto_add_stages(&pool, song_id).await.unwrap();
+
+    // Find the tracking stage ID
+    let tracking_id = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM production_stages WHERE song_id = ? AND stage = 'tracking'",
+    )
+    .bind(song_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let step_ids: Vec<i64> = queries::auto_add_steps(&pool, tracking_id, false)
+        .await
+        .unwrap();
+    assert!(
+        !step_ids.is_empty(),
+        "Expected steps to be created for tracking"
+    );
+
+    let rows = sqlx::query("SELECT name FROM production_steps WHERE stage_id = ?")
+        .bind(tracking_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let names: Vec<String> = rows.iter().map(|r| r.get("name")).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Guitar")),
+        "Expected guitar step"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Drums")),
+        "Expected drums step"
+    );
+}
+
+#[tokio::test]
+async fn test_auto_add_steps_cover_has_simpler_composition() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "Cover Song", "cover").await;
+
+    let stage_ids: Vec<i64> = queries::auto_add_stages(&pool, song_id).await.unwrap();
+
+    // Find the composition stage ID
+    let comp_id = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM production_stages WHERE song_id = ? AND stage = 'composition'",
+    )
+    .bind(song_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let step_ids: Vec<i64> = queries::auto_add_steps(&pool, comp_id, true).await.unwrap();
+    let rows = sqlx::query("SELECT name FROM production_steps WHERE stage_id = ?")
+        .bind(comp_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let names: Vec<String> = rows.iter().map(|r| r.get("name")).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Learn vocals")),
+        "Cover composition should have 'Learn vocals' step, got {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n.contains("composed")),
+        "Cover composition should NOT have composition steps, got {names:?}"
+    );
+}
+
+// ===========================================================================
+// Song file instruments M2M
+// ===========================================================================
+
+#[tokio::test]
+async fn test_song_file_instruments_m2m() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "Multi Instrument File", "song").await;
+    let guitar_id = insert_instrument(&pool, "Guitar", "guitar").await;
+    let bass_id = insert_instrument(&pool, "Bass", "bass").await;
+
+    let file_id = sqlx::query(
+        "INSERT INTO song_files (song_id, file_type, path, description) VALUES (?, ?, ?, ?)",
+    )
+    .bind(song_id)
+    .bind("stem")
+    .bind("/stems/full_stem.wav")
+    .bind("Full mix stem")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Link file to multiple instruments
+    sqlx::query("INSERT INTO song_file_instruments (song_file_id, instrument_id) VALUES (?, ?)")
+        .bind(file_id)
+        .bind(guitar_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO song_file_instruments (song_file_id, instrument_id) VALUES (?, ?)")
+        .bind(file_id)
+        .bind(bass_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let rows =
+        sqlx::query("SELECT instrument_id FROM song_file_instruments WHERE song_file_id = ?")
+            .bind(file_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let inst_ids: Vec<i64> = rows.iter().map(|r| r.get("instrument_id")).collect();
+    assert!(
+        inst_ids.contains(&guitar_id),
+        "Expected guitar linked to file"
+    );
+    assert!(inst_ids.contains(&bass_id), "Expected bass linked to file");
 }

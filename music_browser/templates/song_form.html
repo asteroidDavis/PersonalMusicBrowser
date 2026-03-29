@@ -3,6 +3,7 @@
 {% block content %}
 <h2>{% if editing %}Edit Song{% else %}Add Song{% endif %}</h2>
 <form class="form" method="post">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
     <div class="form-group">
         <label for="title">Title</label>
         <input type="text" id="title" name="title" required value="{{ title }}">
