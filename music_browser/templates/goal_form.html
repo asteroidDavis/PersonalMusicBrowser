@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}New Goal{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>🎯 New Goal</h2>
+</div>
+<form method="post" action="/goals/new" class="form-card">
+    <div class="form-group">
+        <label for="horizon">Horizon *</label>
+        <select id="horizon" name="horizon" required>
+            <option value="5_year">5-Year</option>
+            <option value="1_year">1-Year</option>
+            <option value="6_week">6-Week</option>
+            <option value="1_week" selected>1-Week</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="category">Category *</label>
+        <select id="category" name="category" required>
+            <option value="general">General</option>
+            <option value="production">Production</option>
+            <option value="practice">Practice</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="title">Title *</label>
+        <input type="text" id="title" name="title" required maxlength="256" placeholder="e.g. Record 3 cover songs">
+    </div>
+    <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" placeholder="Details about this goal..."></textarea>
+    </div>
+    <div class="form-group">
+        <label for="target_date">Target Date</label>
+        <input type="date" id="target_date" name="target_date">
+    </div>
+    <div class="form-group">
+        <label for="sort_order">Sort Order</label>
+        <input type="number" id="sort_order" name="sort_order" value="0">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Goal</button>
+        <a href="/goals" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

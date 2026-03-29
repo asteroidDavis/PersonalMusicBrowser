@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Profile{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>👤 Profile & Capacity</h2>
+</div>
+<form method="post" action="/profile" class="form-card">
+    <div class="form-group">
+        <label for="display_name">Display Name</label>
+        <input type="text" id="display_name" name="display_name" value="{{ profile.display_name }}">
+    </div>
+    <fieldset style="border:1px solid var(--border); border-radius:var(--radius); padding:1rem; margin-bottom:1rem;">
+        <legend style="font-weight:700; padding:0 .5rem;">⏱️ Session Time Budget (minutes)</legend>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.75rem;">
+            <div class="form-group">
+                <label for="warmup_minutes">Warmup</label>
+                <input type="number" id="warmup_minutes" name="warmup_minutes" value="{{ profile.warmup_minutes }}" min="0">
+            </div>
+            <div class="form-group">
+                <label for="drill_minutes">Drills</label>
+                <input type="number" id="drill_minutes" name="drill_minutes" value="{{ profile.drill_minutes }}" min="0">
+            </div>
+            <div class="form-group">
+                <label for="song_minutes">Song Practice</label>
+                <input type="number" id="song_minutes" name="song_minutes" value="{{ profile.song_minutes }}" min="0">
+            </div>
+            <div class="form-group">
+                <label for="review_minutes">Review</label>
+                <input type="number" id="review_minutes" name="review_minutes" value="{{ profile.review_minutes }}" min="0">
+            </div>
+        </div>
+    </fieldset>
+    <div class="form-group">
+        <label for="songs_capacity">Songs Capacity <span class="text-muted">(max songs per session)</span></label>
+        <input type="number" id="songs_capacity" name="songs_capacity" value="{{ profile.songs_capacity }}" min="1" max="20">
+    </div>
+    <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="3">{{ profile.notes }}</textarea>
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Profile</button>
+    </div>
+</form>
+{% endblock %}

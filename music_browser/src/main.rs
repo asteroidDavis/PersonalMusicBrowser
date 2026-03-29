@@ -432,6 +432,10 @@ async fn song_create(
         original_artist: form.original_artist.clone(),
         score_url: form.score_url.clone(),
         description: form.description.clone(),
+        workflow_state: WorkflowState::Discovered,
+        scores_folder: String::new(),
+        export_folder: String::new(),
+        musicxml_path: String::new(),
         artist_ids: form.artist_ids.clone(),
     };
     queries::create_song(&pool, &input)
@@ -510,6 +514,9 @@ async fn song_update(
         original_artist: form.original_artist.clone(),
         score_url: form.score_url.clone(),
         description: form.description.clone(),
+        scores_folder: String::new(),
+        export_folder: String::new(),
+        musicxml_path: String::new(),
         artist_ids: form.artist_ids.clone(),
     };
     queries::update_song(&pool, &input)
@@ -1126,6 +1133,448 @@ async fn practice_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpRes
 }
 
 // ---------------------------------------------------------------------------
+// Kanban workflow board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct KanbanColumn {
+    state: String,
+    label: String,
+    emoji: String,
+    songs: Vec<KanbanSong>,
+}
+
+#[derive(Debug, Clone)]
+struct KanbanSong {
+    id: i64,
+    title: String,
+    song_type: String,
+    original_artist: String,
+    key: String,
+    bpm: String,
+    scores_folder: String,
+    export_folder: String,
+    musicxml_path: String,
+}
+
+#[derive(Template)]
+#[template(path = "kanban.html")]
+struct KanbanTemplate {
+    columns: Vec<KanbanColumn>,
+    all_states: Vec<(String, String)>,
+}
+
+async fn kanban_board(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let mut columns = Vec::new();
+    for state in WorkflowState::all() {
+        let songs = queries::list_songs_by_workflow_state(&pool, state)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        columns.push(KanbanColumn {
+            state: state.as_str().to_string(),
+            label: state.label().to_string(),
+            emoji: state.emoji().to_string(),
+            songs: songs
+                .iter()
+                .map(|s| KanbanSong {
+                    id: s.id,
+                    title: s.title.clone(),
+                    song_type: s.song_type.to_string(),
+                    original_artist: s.original_artist.clone(),
+                    key: s.key.clone(),
+                    bpm: format_bpm(s.bpm_lower, s.bpm_upper),
+                    scores_folder: s.scores_folder.clone(),
+                    export_folder: s.export_folder.clone(),
+                    musicxml_path: s.musicxml_path.clone(),
+                })
+                .collect(),
+        });
+    }
+
+    let all_states: Vec<(String, String)> = WorkflowState::all()
+        .iter()
+        .map(|s| (s.as_str().to_string(), s.label().to_string()))
+        .collect();
+
+    let body = KanbanTemplate {
+        columns,
+        all_states,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+#[derive(Deserialize)]
+struct WorkflowUpdateForm {
+    workflow_state: String,
+}
+
+async fn workflow_update(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<WorkflowUpdateForm>,
+) -> actix_web::Result<HttpResponse> {
+    let song_id = path.into_inner();
+    let state = WorkflowState::parse(&form.0.workflow_state)
+        .ok_or_else(|| actix_web::error::ErrorBadRequest("Invalid workflow state"))?;
+    queries::update_workflow_state(&pool, song_id, &state)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/workflow"))
+        .finish())
+}
+
+// JSON endpoint for drag-and-drop
+async fn workflow_update_json(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    body: web::Json<WorkflowUpdateForm>,
+) -> actix_web::Result<HttpResponse> {
+    let song_id = path.into_inner();
+    let state = WorkflowState::parse(&body.workflow_state)
+        .ok_or_else(|| actix_web::error::ErrorBadRequest("Invalid workflow state"))?;
+    queries::update_workflow_state(&pool, song_id, &state)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({"ok": true})))
+}
+
+// ---------------------------------------------------------------------------
+// Practice exercises
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "exercises.html")]
+struct ExercisesTemplate {
+    exercises: Vec<PracticeExercise>,
+}
+
+#[derive(Template)]
+#[template(path = "exercise_form.html")]
+struct ExerciseFormTemplate {
+    instruments: Vec<Instrument>,
+}
+
+#[derive(Deserialize)]
+struct ExerciseFormData {
+    instrument_id: Option<i64>,
+    name: String,
+    category: String,
+    description: String,
+    source: String,
+    sort_order: i32,
+}
+
+async fn exercise_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let exercises = queries::list_exercises(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ExercisesTemplate { exercises }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn exercise_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let instruments = queries::list_instruments(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ExerciseFormTemplate { instruments }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn exercise_create(
+    pool: web::Data<SqlitePool>,
+    form: QsForm<ExerciseFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let f = form.0;
+    queries::create_exercise(
+        &pool,
+        &CreatePracticeExercise {
+            instrument_id: f.instrument_id,
+            name: f.name,
+            category: f.category,
+            description: f.description,
+            source: f.source,
+            sort_order: f.sort_order,
+        },
+    )
+    .await
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/exercises"))
+        .finish())
+}
+
+async fn exercise_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_exercise(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/exercises"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// Goals
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "goals.html")]
+struct GoalsTemplate {
+    goals: Vec<Goal>,
+}
+
+#[derive(Template)]
+#[template(path = "goal_form.html")]
+struct GoalFormTemplate {}
+
+#[derive(Deserialize)]
+struct GoalFormData {
+    horizon: String,
+    category: String,
+    title: String,
+    description: String,
+    target_date: String,
+    sort_order: i32,
+}
+
+async fn goal_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let goals = queries::list_goals(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = GoalsTemplate { goals }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn goal_new() -> actix_web::Result<HttpResponse> {
+    let body = GoalFormTemplate {}
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn goal_create(
+    pool: web::Data<SqlitePool>,
+    form: QsForm<GoalFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let f = form.0;
+    queries::create_goal(
+        &pool,
+        &CreateGoal {
+            horizon: f.horizon,
+            category: f.category,
+            title: f.title,
+            description: f.description,
+            target_date: f.target_date,
+            sort_order: f.sort_order,
+        },
+    )
+    .await
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/goals"))
+        .finish())
+}
+
+async fn goal_toggle(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::toggle_goal(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/goals"))
+        .finish())
+}
+
+async fn goal_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_goal(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/goals"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// User profile
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "profile.html")]
+struct ProfileTemplate {
+    profile: UserProfile,
+}
+
+#[derive(Deserialize)]
+struct ProfileFormData {
+    display_name: String,
+    songs_capacity: i32,
+    warmup_minutes: i32,
+    drill_minutes: i32,
+    song_minutes: i32,
+    review_minutes: i32,
+    notes: String,
+}
+
+async fn profile_view(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let profile = queries::get_profile(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ProfileTemplate { profile }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn profile_update(
+    pool: web::Data<SqlitePool>,
+    form: QsForm<ProfileFormData>,
+) -> actix_web::Result<HttpResponse> {
+    let f = form.0;
+    queries::update_profile(
+        &pool,
+        &UpdateUserProfile {
+            display_name: f.display_name,
+            songs_capacity: f.songs_capacity,
+            warmup_minutes: f.warmup_minutes,
+            drill_minutes: f.drill_minutes,
+            song_minutes: f.song_minutes,
+            review_minutes: f.review_minutes,
+            notes: f.notes,
+        },
+    )
+    .await
+    .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/profile"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// Schedule
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "schedule.html")]
+struct ScheduleTemplate {
+    events: Vec<ScheduleEvent>,
+}
+
+#[derive(Deserialize)]
+struct GenerateScheduleForm {
+    start_date: String,
+    num_days: i32,
+}
+
+async fn schedule_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let events = queries::list_schedule_events(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ScheduleTemplate { events }
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn schedule_generate(
+    pool: web::Data<SqlitePool>,
+    form: QsForm<GenerateScheduleForm>,
+) -> actix_web::Result<HttpResponse> {
+    let f = form.0;
+    queries::generate_schedule(&pool, &f.start_date, f.num_days)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/schedule"))
+        .finish())
+}
+
+async fn schedule_item_toggle(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::toggle_schedule_item(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/schedule"))
+        .finish())
+}
+
+async fn schedule_event_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_schedule_event(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/schedule"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// ICS export
+// ---------------------------------------------------------------------------
+
+async fn schedule_ics_export(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let events = queries::list_schedule_events(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    let mut ics = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//PersonalMusicBrowser//EN\r\nCALSCALE:GREGORIAN\r\n");
+
+    for event in &events {
+        let date_clean = event.event_date.replace('-', "");
+        let total_minutes: i32 = event.items.iter().map(|i| i.duration_minutes).sum();
+        let hours = total_minutes / 60;
+        let mins = total_minutes % 60;
+
+        ics.push_str("BEGIN:VEVENT\r\n");
+        ics.push_str(&format!("UID:event-{}@personalmusicbrowser\r\n", event.id));
+        ics.push_str(&format!("DTSTART;VALUE=DATE:{date_clean}\r\n"));
+        ics.push_str(&format!("DTEND;VALUE=DATE:{date_clean}\r\n"));
+        ics.push_str(&format!("SUMMARY:{}\r\n", event.title.replace(',', "\\,")));
+
+        let mut desc = format!("Duration: {hours}h {mins}m\\n\\n");
+        for item in &event.items {
+            let check = if item.completed { "✅" } else { "⬜" };
+            desc.push_str(&format!(
+                "{check} {} ({}min)\\n",
+                item.title, item.duration_minutes
+            ));
+        }
+        ics.push_str(&format!("DESCRIPTION:{desc}\r\n"));
+        ics.push_str("END:VEVENT\r\n");
+    }
+
+    ics.push_str("END:VCALENDAR\r\n");
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/calendar; charset=utf-8")
+        .insert_header((
+            "Content-Disposition",
+            "attachment; filename=\"practice-schedule.ics\"",
+        ))
+        .body(ics))
+}
+
+// ---------------------------------------------------------------------------
 // App configuration (shared between main and tests)
 // ---------------------------------------------------------------------------
 
@@ -1204,7 +1653,43 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
             web::post().to(song_file_delete),
         )
         // Practice
-        .route("/practice", web::get().to(practice_list));
+        .route("/practice", web::get().to(practice_list))
+        // Kanban workflow board
+        .route("/workflow", web::get().to(kanban_board))
+        .route(
+            "/workflow/songs/{id}/state",
+            web::post().to(workflow_update),
+        )
+        .route(
+            "/api/workflow/songs/{id}/state",
+            web::put().to(workflow_update_json),
+        )
+        // Exercises
+        .route("/exercises", web::get().to(exercise_list))
+        .route("/exercises/new", web::get().to(exercise_new))
+        .route("/exercises/new", web::post().to(exercise_create))
+        .route("/exercises/{id}/delete", web::post().to(exercise_delete))
+        // Goals
+        .route("/goals", web::get().to(goal_list))
+        .route("/goals/new", web::get().to(goal_new))
+        .route("/goals/new", web::post().to(goal_create))
+        .route("/goals/{id}/toggle", web::post().to(goal_toggle))
+        .route("/goals/{id}/delete", web::post().to(goal_delete))
+        // Profile
+        .route("/profile", web::get().to(profile_view))
+        .route("/profile", web::post().to(profile_update))
+        // Schedule
+        .route("/schedule", web::get().to(schedule_list))
+        .route("/schedule/generate", web::post().to(schedule_generate))
+        .route(
+            "/schedule/items/{id}/toggle",
+            web::post().to(schedule_item_toggle),
+        )
+        .route(
+            "/schedule/events/{id}/delete",
+            web::post().to(schedule_event_delete),
+        )
+        .route("/schedule/export.ics", web::get().to(schedule_ics_export));
 }
 
 // ---------------------------------------------------------------------------
