@@ -32,9 +32,47 @@
         <div class="practice-card-meta">
             {% if !entry.key.is_empty() %}<span class="meta-tag">🎵 {{ entry.key }}</span>{% endif %}
             {% if !entry.bpm.is_empty() %}<span class="meta-tag">🥁 {{ entry.bpm }}</span>{% endif %}
+            {% if !entry.time_signature.is_empty() %}<span class="meta-tag">🎼 {{ entry.time_signature }}</span>{% endif %}
+            <span class="meta-tag">📋 {{ entry.workflow_state }}</span>
             {% if !entry.score_url.is_empty() %}<a href="{{ entry.score_url }}" target="_blank" class="meta-tag meta-link">📄 Score</a>{% endif %}
         </div>
     </div>
+
+    {# Priority ranking #}
+    <div style="display:flex;align-items:center;gap:.75rem;margin:.5rem 0;">
+        <form method="post" action="/practice/songs/{{ entry.song_id }}/priority" style="display:flex;align-items:center;gap:.4rem;margin:0;">
+            <span style="font-size:.85em;font-weight:600;">Priority:</span>
+            {% for p in 0..6 %}
+                <button type="submit" name="priority" value="{{ p }}"
+                    style="padding:2px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-size:.85em;
+                    {% if entry.practice_priority == p %}background:var(--accent);color:#fff;{% else %}background:var(--surface);{% endif %}">
+                    {% if p == 0 %}—{% else %}{{ p }}{% endif %}
+                </button>
+            {% endfor %}
+            <span class="text-muted" style="font-size:.8em">(1=highest)</span>
+        </form>
+    </div>
+
+    {# Key-based practice breakdown #}
+    {% if !entry.key.is_empty() %}
+    <div class="practice-key-section" style="background:var(--surface);border-radius:8px;padding:.75rem 1rem;margin:.5rem 0;">
+        <h4 style="margin:0 0 .4rem;font-size:.95em;">🎵 Key of {{ entry.key }} — Practice Breakdown</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
+            <span class="meta-tag" title="Scales in this key">🎹 Scales</span>
+            <span class="meta-tag" title="Chord progressions">🎸 Chord Changes</span>
+            <span class="meta-tag" title="Arpeggios through chord tones">🎶 Arpeggios</span>
+            <span class="meta-tag" title="Vocal/instrumental voices">🎤 Voices</span>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Practice project #}
+    {% if !entry.practice_project_path.is_empty() %}
+    <div style="margin:.5rem 0;">
+        <span class="meta-tag" title="Practice project (e.g. GarageBand)">🎛️ Practice Project: <code>{{ entry.practice_project_path }}</code></span>
+        {% if !entry.time_signature.is_empty() %}<span class="text-muted" style="font-size:.85em">({{ entry.time_signature }} time)</span>{% endif %}
+    </div>
+    {% endif %}
 
     {% if entry.instruments.is_empty() && entry.files.is_empty() %}
         <p class="count" style="padding:.5rem 0">No practice details yet.

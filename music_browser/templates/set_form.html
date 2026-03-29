@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}New Set — Personal Music Browser{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>🎤 New Live Set</h2>
+</div>
+
+<form method="post" action="/sets/new" class="form-card">
+    <label>
+        Name
+        <input type="text" name="name" required maxlength="256" placeholder="Friday Night Set">
+    </label>
+
+    <label>
+        Type
+        <select name="set_type">
+            <option value="live">🎤 Live</option>
+            <option value="album_practice">💿 Album Practice</option>
+            <option value="rehearsal">🎶 Rehearsal</option>
+        </select>
+    </label>
+
+    <label>
+        Target Duration (seconds)
+        <input type="number" name="target_duration_seconds" value="2700" min="0" step="60">
+        <span class="text-muted" style="font-size:.85em">e.g. 2700 = 45 minutes</span>
+    </label>
+
+    <label>
+        Description
+        <textarea name="description" rows="3" placeholder="Notes about this set..."></textarea>
+    </label>
+
+    <div class="form-actions">
+        <button type="submit" class="btn">Create Set</button>
+        <a href="/sets" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

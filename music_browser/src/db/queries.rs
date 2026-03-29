@@ -242,184 +242,134 @@ async fn fetch_song_artists(pool: &SqlitePool, song_id: i64) -> Result<Vec<Artis
     Ok(artists)
 }
 
-#[allow(clippy::type_complexity)]
-fn row_to_song_fields(
-    row: &sqlx::sqlite::SqliteRow,
-) -> (
-    String,
-    String,
-    String,
-    String,
-    Option<i32>,
-    Option<i32>,
-    String,
-    String,
-    String,
-    WorkflowState,
-    String,
-    String,
-    String,
-) {
-    let sheet_music = row
-        .get::<Option<String>, _>("sheet_music")
-        .unwrap_or_default();
-    let lyrics = row.get::<Option<String>, _>("lyrics").unwrap_or_default();
-    let key = row.get::<Option<String>, _>("key").unwrap_or_default();
-    let album_title = row
-        .get::<Option<String>, _>("album_title")
-        .unwrap_or_default();
-    let bpm_lower: Option<i32> = row.get("bpm_lower");
-    let bpm_upper: Option<i32> = row.get("bpm_upper");
-    let original_artist = row
-        .get::<Option<String>, _>("original_artist")
-        .unwrap_or_default();
-    let score_url = row
-        .get::<Option<String>, _>("score_url")
-        .unwrap_or_default();
-    let description = row
-        .get::<Option<String>, _>("description")
-        .unwrap_or_default();
+struct SongFields {
+    sheet_music: String,
+    lyrics: String,
+    key: String,
+    album_title: String,
+    bpm_lower: Option<i32>,
+    bpm_upper: Option<i32>,
+    original_artist: String,
+    score_url: String,
+    description: String,
+    workflow_state: WorkflowState,
+    scores_folder: String,
+    export_folder: String,
+    musicxml_path: String,
+    practice_project_path: String,
+    time_signature: String,
+    practice_priority: i32,
+}
+
+fn row_to_song_fields(row: &sqlx::sqlite::SqliteRow) -> SongFields {
     let wf_str: String = row
         .get::<Option<String>, _>("workflow_state")
         .unwrap_or_else(|| "discovered".to_string());
-    let workflow_state = WorkflowState::parse(&wf_str).unwrap_or(WorkflowState::Discovered);
-    let scores_folder = row
-        .get::<Option<String>, _>("scores_folder")
-        .unwrap_or_default();
-    let export_folder = row
-        .get::<Option<String>, _>("export_folder")
-        .unwrap_or_default();
-    let musicxml_path = row
-        .get::<Option<String>, _>("musicxml_path")
-        .unwrap_or_default();
-    (
-        sheet_music,
-        lyrics,
-        key,
-        album_title,
-        bpm_lower,
-        bpm_upper,
-        original_artist,
-        score_url,
-        description,
-        workflow_state,
-        scores_folder,
-        export_folder,
-        musicxml_path,
-    )
+    SongFields {
+        sheet_music: row
+            .get::<Option<String>, _>("sheet_music")
+            .unwrap_or_default(),
+        lyrics: row.get::<Option<String>, _>("lyrics").unwrap_or_default(),
+        key: row.get::<Option<String>, _>("key").unwrap_or_default(),
+        album_title: row
+            .get::<Option<String>, _>("album_title")
+            .unwrap_or_default(),
+        bpm_lower: row.get("bpm_lower"),
+        bpm_upper: row.get("bpm_upper"),
+        original_artist: row
+            .get::<Option<String>, _>("original_artist")
+            .unwrap_or_default(),
+        score_url: row
+            .get::<Option<String>, _>("score_url")
+            .unwrap_or_default(),
+        description: row
+            .get::<Option<String>, _>("description")
+            .unwrap_or_default(),
+        workflow_state: WorkflowState::parse(&wf_str).unwrap_or(WorkflowState::Discovered),
+        scores_folder: row
+            .get::<Option<String>, _>("scores_folder")
+            .unwrap_or_default(),
+        export_folder: row
+            .get::<Option<String>, _>("export_folder")
+            .unwrap_or_default(),
+        musicxml_path: row
+            .get::<Option<String>, _>("musicxml_path")
+            .unwrap_or_default(),
+        practice_project_path: row
+            .get::<Option<String>, _>("practice_project_path")
+            .unwrap_or_default(),
+        time_signature: row
+            .get::<Option<String>, _>("time_signature")
+            .unwrap_or_else(|| "4/4".to_string()),
+        practice_priority: row.get::<Option<i32>, _>("practice_priority").unwrap_or(0),
+    }
 }
 
+fn song_from_row(row: &sqlx::sqlite::SqliteRow, f: SongFields, artists: Vec<Artist>) -> Song {
+    let song_type_str: String = row.get("song_type");
+    Song {
+        id: row.get("id"),
+        title: row.get("title"),
+        album_id: row.get("album_id"),
+        album_title: f.album_title,
+        sheet_music: f.sheet_music,
+        lyrics: f.lyrics,
+        song_type: SongType::parse(&song_type_str).unwrap_or(SongType::Song),
+        key: f.key,
+        bpm_lower: f.bpm_lower,
+        bpm_upper: f.bpm_upper,
+        original_artist: f.original_artist,
+        score_url: f.score_url,
+        description: f.description,
+        workflow_state: f.workflow_state,
+        scores_folder: f.scores_folder,
+        export_folder: f.export_folder,
+        musicxml_path: f.musicxml_path,
+        practice_project_path: f.practice_project_path,
+        time_signature: f.time_signature,
+        practice_priority: f.practice_priority,
+        artists,
+    }
+}
+
+const SONG_SELECT_COLS: &str = "s.id, s.title, s.album_id, COALESCE(a.title, '') as album_title, \
+     s.sheet_music, s.lyrics, s.song_type, s.key, s.bpm_lower, s.bpm_upper, \
+     s.original_artist, s.score_url, s.description, \
+     s.workflow_state, s.scores_folder, s.export_folder, s.musicxml_path, \
+     s.practice_project_path, s.time_signature, s.practice_priority";
+
 pub async fn list_songs(pool: &SqlitePool) -> Result<Vec<Song>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT s.id, s.title, s.album_id, COALESCE(a.title, '') as album_title, \
-         s.sheet_music, s.lyrics, s.song_type, s.key, s.bpm_lower, s.bpm_upper, \
-         s.original_artist, s.score_url, s.description, \
-         s.workflow_state, s.scores_folder, s.export_folder, s.musicxml_path \
-         FROM songs s \
+    let sql = format!(
+        "SELECT {SONG_SELECT_COLS} FROM songs s \
          LEFT JOIN albums a ON a.id = s.album_id \
-         ORDER BY s.title",
-    )
-    .fetch_all(pool)
-    .await?;
+         ORDER BY s.title"
+    );
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
 
     let mut songs = Vec::new();
     for row in &rows {
         let sid: i64 = row.get("id");
-        let song_type_str: String = row.get("song_type");
         let artists = fetch_song_artists(pool, sid).await?;
-        let (
-            sheet_music,
-            lyrics,
-            key,
-            album_title,
-            bpm_lower,
-            bpm_upper,
-            original_artist,
-            score_url,
-            description,
-            workflow_state,
-            scores_folder,
-            export_folder,
-            musicxml_path,
-        ) = row_to_song_fields(row);
-        songs.push(Song {
-            id: sid,
-            title: row.get("title"),
-            album_id: row.get("album_id"),
-            album_title,
-            sheet_music,
-            lyrics,
-            song_type: SongType::parse(&song_type_str).unwrap_or(SongType::Song),
-            key,
-            bpm_lower,
-            bpm_upper,
-            original_artist,
-            score_url,
-            description,
-            workflow_state,
-            scores_folder,
-            export_folder,
-            musicxml_path,
-            artists,
-        });
+        let f = row_to_song_fields(row);
+        songs.push(song_from_row(row, f, artists));
     }
     Ok(songs)
 }
 
 pub async fn get_song(pool: &SqlitePool, id: i64) -> Result<Option<Song>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT s.id, s.title, s.album_id, COALESCE(a.title, '') as album_title, \
-         s.sheet_music, s.lyrics, s.song_type, s.key, s.bpm_lower, s.bpm_upper, \
-         s.original_artist, s.score_url, s.description, \
-         s.workflow_state, s.scores_folder, s.export_folder, s.musicxml_path \
-         FROM songs s \
+    let sql = format!(
+        "SELECT {SONG_SELECT_COLS} FROM songs s \
          LEFT JOIN albums a ON a.id = s.album_id \
-         WHERE s.id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+         WHERE s.id = ?"
+    );
+    let row = sqlx::query(&sql).bind(id).fetch_optional(pool).await?;
 
     match row {
         Some(row) => {
             let sid: i64 = row.get("id");
-            let song_type_str: String = row.get("song_type");
             let artists = fetch_song_artists(pool, sid).await?;
-            let (
-                sheet_music,
-                lyrics,
-                key,
-                album_title,
-                bpm_lower,
-                bpm_upper,
-                original_artist,
-                score_url,
-                description,
-                workflow_state,
-                scores_folder,
-                export_folder,
-                musicxml_path,
-            ) = row_to_song_fields(&row);
-            Ok(Some(Song {
-                id: sid,
-                title: row.get("title"),
-                album_id: row.get("album_id"),
-                album_title,
-                sheet_music,
-                lyrics,
-                song_type: SongType::parse(&song_type_str).unwrap_or(SongType::Song),
-                key,
-                bpm_lower,
-                bpm_upper,
-                original_artist,
-                score_url,
-                description,
-                workflow_state,
-                scores_folder,
-                export_folder,
-                musicxml_path,
-                artists,
-            }))
+            let f = row_to_song_fields(&row);
+            Ok(Some(song_from_row(&row, f, artists)))
         }
         None => Ok(None),
     }
@@ -430,8 +380,9 @@ pub async fn create_song(pool: &SqlitePool, input: &CreateSong) -> Result<i64, s
     let result = sqlx::query(
         "INSERT INTO songs (title, album_id, sheet_music, lyrics, song_type, \
          key, bpm_lower, bpm_upper, original_artist, score_url, description, \
-         workflow_state, scores_folder, export_folder, musicxml_path) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         workflow_state, scores_folder, export_folder, musicxml_path, \
+         practice_project_path, time_signature, practice_priority) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.title)
     .bind(input.album_id)
@@ -448,6 +399,9 @@ pub async fn create_song(pool: &SqlitePool, input: &CreateSong) -> Result<i64, s
     .bind(&input.scores_folder)
     .bind(&input.export_folder)
     .bind(&input.musicxml_path)
+    .bind(&input.practice_project_path)
+    .bind(&input.time_signature)
+    .bind(input.practice_priority)
     .execute(pool)
     .await?;
     let song_id = result.last_insert_rowid();
@@ -468,7 +422,9 @@ pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sq
         "UPDATE songs SET title = ?, album_id = ?, sheet_music = ?, lyrics = ?, \
          key = ?, bpm_lower = ?, bpm_upper = ?, original_artist = ?, \
          score_url = ?, description = ?, \
-         scores_folder = ?, export_folder = ?, musicxml_path = ? WHERE id = ?",
+         scores_folder = ?, export_folder = ?, musicxml_path = ?, \
+         practice_project_path = ?, time_signature = ?, practice_priority = ? \
+         WHERE id = ?",
     )
     .bind(&input.title)
     .bind(input.album_id)
@@ -483,6 +439,9 @@ pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sq
     .bind(&input.scores_folder)
     .bind(&input.export_folder)
     .bind(&input.musicxml_path)
+    .bind(&input.practice_project_path)
+    .bind(&input.time_signature)
+    .bind(input.practice_priority)
     .bind(input.id)
     .execute(pool)
     .await?;
@@ -1367,60 +1326,23 @@ pub async fn list_songs_by_workflow_state(
     pool: &SqlitePool,
     state: &WorkflowState,
 ) -> Result<Vec<Song>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT s.id, s.title, s.album_id, COALESCE(a.title, '') as album_title, \
-         s.sheet_music, s.lyrics, s.song_type, s.key, s.bpm_lower, s.bpm_upper, \
-         s.original_artist, s.score_url, s.description, \
-         s.workflow_state, s.scores_folder, s.export_folder, s.musicxml_path \
-         FROM songs s \
+    let sql = format!(
+        "SELECT {SONG_SELECT_COLS} FROM songs s \
          LEFT JOIN albums a ON a.id = s.album_id \
          WHERE s.workflow_state = ? \
-         ORDER BY s.title",
-    )
-    .bind(state.as_str())
-    .fetch_all(pool)
-    .await?;
+         ORDER BY s.title"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(state.as_str())
+        .fetch_all(pool)
+        .await?;
 
     let mut songs = Vec::new();
     for row in &rows {
         let sid: i64 = row.get("id");
-        let song_type_str: String = row.get("song_type");
         let artists = fetch_song_artists(pool, sid).await?;
-        let (
-            sheet_music,
-            lyrics,
-            key,
-            album_title,
-            bpm_lower,
-            bpm_upper,
-            original_artist,
-            score_url,
-            description,
-            workflow_state,
-            scores_folder,
-            export_folder,
-            musicxml_path,
-        ) = row_to_song_fields(row);
-        songs.push(Song {
-            id: sid,
-            title: row.get("title"),
-            album_id: row.get("album_id"),
-            album_title,
-            sheet_music,
-            lyrics,
-            song_type: SongType::parse(&song_type_str).unwrap_or(SongType::Song),
-            key,
-            bpm_lower,
-            bpm_upper,
-            original_artist,
-            score_url,
-            description,
-            workflow_state,
-            scores_folder,
-            export_folder,
-            musicxml_path,
-            artists,
-        });
+        let f = row_to_song_fields(row);
+        songs.push(song_from_row(row, f, artists));
     }
     Ok(songs)
 }
@@ -1929,12 +1851,30 @@ pub async fn generate_schedule(
             sort += 1;
         }
 
-        // 3. Song practice/production (pick up to capacity, rotating through active songs)
-        let songs_for_day: Vec<&Song> = active_songs
-            .iter()
-            .skip((day_offset as usize * capacity) % active_songs.len().max(1))
-            .take(capacity)
-            .collect();
+        // 3. Song practice/production — priority-weighted shuffle
+        //    Priority 1 (highest) gets weight 5, priority 5 gets weight 1, 0 (unranked) gets 2
+        let songs_for_day: Vec<&Song> = {
+            let mut weighted: Vec<(&Song, u32)> = active_songs
+                .iter()
+                .map(|s| {
+                    let w = match s.practice_priority {
+                        1 => 5u32,
+                        2 => 4,
+                        3 => 3,
+                        4 => 2,
+                        5 => 1,
+                        _ => 2, // unranked gets moderate weight
+                    };
+                    (s, w)
+                })
+                .collect();
+            // Deterministic-ish shuffle: rotate by day_offset, then stable-sort
+            // descending by weight so higher-priority songs appear first
+            let len = weighted.len().max(1);
+            weighted.rotate_left((day_offset as usize) % len);
+            weighted.sort_by(|a, b| b.1.cmp(&a.1));
+            weighted.iter().map(|(s, _)| *s).take(capacity).collect()
+        };
         for song in &songs_for_day {
             let item_type = match song.workflow_state {
                 WorkflowState::Producing | WorkflowState::CoverRecording => "song_production",
@@ -2048,4 +1988,141 @@ fn add_days_to_date(date_str: &str, days: i32) -> String {
         }
     }
     format!("{y:04}-{m:02}-{:02}", total_day)
+}
+
+// ============================================================================
+// Practice priority
+// ============================================================================
+
+pub async fn update_practice_priority(
+    pool: &SqlitePool,
+    song_id: i64,
+    priority: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE songs SET practice_priority = ? WHERE id = ?")
+        .bind(priority)
+        .bind(song_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ============================================================================
+// Live sets
+// ============================================================================
+
+pub async fn list_live_sets(pool: &SqlitePool) -> Result<Vec<LiveSet>, sqlx::Error> {
+    let set_rows = sqlx::query(
+        "SELECT id, name, set_type, description, target_duration_seconds, created_at \
+         FROM live_sets ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut sets = Vec::new();
+    for sr in &set_rows {
+        let set_id: i64 = sr.get("id");
+        let song_rows = sqlx::query(
+            "SELECT ls.id, ls.set_id, ls.song_id, s.title as song_title, \
+             ls.sort_order, ls.backing_track_path, ls.duration_seconds, ls.transition_notes \
+             FROM live_set_songs ls \
+             JOIN songs s ON s.id = ls.song_id \
+             WHERE ls.set_id = ? \
+             ORDER BY ls.sort_order, s.title",
+        )
+        .bind(set_id)
+        .fetch_all(pool)
+        .await?;
+
+        let songs: Vec<LiveSetSong> = song_rows
+            .iter()
+            .map(|r| LiveSetSong {
+                id: r.get("id"),
+                set_id: r.get("set_id"),
+                song_id: r.get("song_id"),
+                song_title: r.get("song_title"),
+                sort_order: r.get("sort_order"),
+                backing_track_path: r
+                    .get::<Option<String>, _>("backing_track_path")
+                    .unwrap_or_default(),
+                duration_seconds: r.get::<Option<i32>, _>("duration_seconds").unwrap_or(0),
+                transition_notes: r
+                    .get::<Option<String>, _>("transition_notes")
+                    .unwrap_or_default(),
+            })
+            .collect();
+
+        let actual_duration: i32 = songs.iter().map(|s| s.duration_seconds).sum();
+
+        sets.push(LiveSet {
+            id: set_id,
+            name: sr.get("name"),
+            set_type: sr.get("set_type"),
+            description: sr
+                .get::<Option<String>, _>("description")
+                .unwrap_or_default(),
+            target_duration_seconds: sr
+                .get::<Option<i32>, _>("target_duration_seconds")
+                .unwrap_or(0),
+            created_at: sr.get("created_at"),
+            actual_duration_seconds: actual_duration,
+            songs,
+        });
+    }
+    Ok(sets)
+}
+
+pub async fn get_live_set(pool: &SqlitePool, id: i64) -> Result<Option<LiveSet>, sqlx::Error> {
+    let sets = list_live_sets(pool).await?;
+    Ok(sets.into_iter().find(|s| s.id == id))
+}
+
+pub async fn create_live_set(pool: &SqlitePool, input: &CreateLiveSet) -> Result<i64, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT INTO live_sets (name, set_type, description, target_duration_seconds) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(&input.name)
+    .bind(&input.set_type)
+    .bind(&input.description)
+    .bind(input.target_duration_seconds)
+    .execute(pool)
+    .await?;
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn delete_live_set(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM live_sets WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn add_song_to_set(
+    pool: &SqlitePool,
+    input: &CreateLiveSetSong,
+) -> Result<i64, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT OR IGNORE INTO live_set_songs \
+         (set_id, song_id, sort_order, backing_track_path, duration_seconds, transition_notes) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(input.set_id)
+    .bind(input.song_id)
+    .bind(input.sort_order)
+    .bind(&input.backing_track_path)
+    .bind(input.duration_seconds)
+    .bind(&input.transition_notes)
+    .execute(pool)
+    .await?;
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn remove_song_from_set(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM live_set_songs WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
