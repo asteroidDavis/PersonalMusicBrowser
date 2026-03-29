@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}New Exercise{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>🏋️ New Practice Exercise</h2>
+</div>
+<form method="post" action="/exercises/new" class="form-card">
+    <div class="form-group">
+        <label for="name">Name *</label>
+        <input type="text" id="name" name="name" required maxlength="256" placeholder="e.g. Chromatic warmup">
+    </div>
+    <div class="form-group">
+        <label for="category">Category *</label>
+        <select id="category" name="category" required>
+            <option value="technique">Technique</option>
+            <option value="scales">Scales</option>
+            <option value="arpeggios">Arpeggios</option>
+            <option value="rhythm">Rhythm</option>
+            <option value="sight_reading">Sight Reading</option>
+            <option value="ear_training">Ear Training</option>
+            <option value="song_practice">Song Practice</option>
+            <option value="other">Other</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="instrument_id">Instrument</label>
+        <select id="instrument_id" name="instrument_id">
+            <option value="">— Any —</option>
+            {% for i in instruments %}
+            <option value="{{ i.id }}">{{ i.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" placeholder="Details about the exercise..."></textarea>
+    </div>
+    <div class="form-group">
+        <label for="source">Source</label>
+        <input type="text" id="source" name="source" placeholder="e.g. Bass Method Book p.42">
+    </div>
+    <div class="form-group">
+        <label for="sort_order">Sort Order</label>
+        <input type="number" id="sort_order" name="sort_order" value="0">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Exercise</button>
+        <a href="/exercises" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

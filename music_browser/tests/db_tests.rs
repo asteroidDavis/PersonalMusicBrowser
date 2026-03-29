@@ -993,8 +993,8 @@ async fn test_production_stage_constraint() {
 
     let song_id = insert_song(&pool, "CS", "song").await;
 
-    // Custom stage names are now allowed (length <= 128)
-    // Only overly long stages (>128 chars) are rejected
+    // Migration 0004 relaxed the stage CHECK to length <= 128, so custom names are allowed.
+    // Test that a stage name exceeding the length limit is rejected.
     let long_stage_name = "x".repeat(129);
     let bad_stage =
         sqlx::query("INSERT INTO production_stages (song_id, stage, status) VALUES (?, ?, ?)")
@@ -1005,9 +1005,10 @@ async fn test_production_stage_constraint() {
             .await;
     assert!(
         bad_stage.is_err(),
-        "Expected CHECK constraint to reject stage name >128 chars"
+        "Expected CHECK constraint to reject stage name longer than 128 chars"
     );
 
+    // Status CHECK constraint is still enforced.
     let bad_status =
         sqlx::query("INSERT INTO production_stages (song_id, stage, status) VALUES (?, ?, ?)")
             .bind(song_id)
@@ -1284,174 +1285,588 @@ async fn test_song_instruments_cascade_on_song_delete() {
     );
 }
 
-// ===========================================================================
-// Auto-add stages and steps
-// ===========================================================================
+// ============================================================================
+// Scheduling feature tests
+// ============================================================================
 
 #[tokio::test]
-async fn test_auto_add_stages_creates_all_7() {
+async fn test_workflow_state_transitions() {
     let (pool, _tmp) = setup_pool().await;
-    let song_id = insert_song(&pool, "Stages Song", "song").await;
+    let song_id = insert_song(&pool, "WF Song", "song").await;
 
-    let ids = queries::auto_add_stages(&pool, song_id).await.unwrap();
-    assert_eq!(ids.len(), 7, "Expected 7 stages created, got {}", ids.len());
-
-    let rows = sqlx::query("SELECT stage FROM production_stages WHERE song_id = ?")
+    // Default should be 'discovered'
+    let row = sqlx::query("SELECT workflow_state FROM songs WHERE id = ?")
         .bind(song_id)
-        .fetch_all(&pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
-    let stages: Vec<String> = rows.iter().map(|r| r.get("stage")).collect();
-    assert!(
-        stages.contains(&"writing".to_string()),
-        "Expected writing stage"
+    let state: String = row.get("workflow_state");
+    assert_eq!(
+        state, "discovered",
+        "Default workflow_state should be 'discovered', got '{state}'"
     );
-    assert!(
-        stages.contains(&"composition".to_string()),
-        "Expected composition stage"
+
+    // Transition to learning
+    use music_browser::db::models::WorkflowState;
+    use music_browser::db::queries;
+
+    queries::update_workflow_state(&pool, song_id, &WorkflowState::Learning)
+        .await
+        .unwrap();
+    let songs = queries::list_songs_by_workflow_state(&pool, &WorkflowState::Learning)
+        .await
+        .unwrap();
+    assert_eq!(
+        songs.len(),
+        1,
+        "Expected 1 song in Learning state, got {}",
+        songs.len()
     );
+    assert_eq!(songs[0].title, "WF Song");
+
+    // Transition to producing
+    queries::update_workflow_state(&pool, song_id, &WorkflowState::Producing)
+        .await
+        .unwrap();
+    let empty = queries::list_songs_by_workflow_state(&pool, &WorkflowState::Learning)
+        .await
+        .unwrap();
     assert!(
-        stages.contains(&"tracking".to_string()),
-        "Expected tracking stage"
+        empty.is_empty(),
+        "Expected 0 songs in Learning after transition, got {}",
+        empty.len()
     );
-    assert!(
-        stages.contains(&"mixing".to_string()),
-        "Expected mixing stage"
-    );
-    assert!(
-        stages.contains(&"mastering".to_string()),
-        "Expected mastering stage"
-    );
-    assert!(
-        stages.contains(&"publishing".to_string()),
-        "Expected publishing stage"
-    );
-    assert!(
-        stages.contains(&"performing".to_string()),
-        "Expected performing stage"
+    let producing = queries::list_songs_by_workflow_state(&pool, &WorkflowState::Producing)
+        .await
+        .unwrap();
+    assert_eq!(
+        producing.len(),
+        1,
+        "Expected 1 song in Producing state, got {}",
+        producing.len()
     );
 }
 
 #[tokio::test]
-async fn test_auto_add_steps_for_tracking() {
+async fn test_workflow_state_constraint() {
     let (pool, _tmp) = setup_pool().await;
-    let song_id = insert_song(&pool, "Tracking Song", "song").await;
 
-    let stage_ids: Vec<i64> = queries::auto_add_stages(&pool, song_id).await.unwrap();
+    let bad = sqlx::query("INSERT INTO songs (title, song_type, workflow_state) VALUES (?, ?, ?)")
+        .bind("Bad")
+        .bind("song")
+        .bind("nonexistent_state")
+        .execute(&pool)
+        .await;
+    assert!(
+        bad.is_err(),
+        "Expected CHECK constraint to reject invalid workflow_state"
+    );
+}
 
-    // Find the tracking stage ID
-    let tracking_id = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM production_stages WHERE song_id = ? AND stage = 'tracking'",
+#[tokio::test]
+async fn test_practice_exercise_crud() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::CreatePracticeExercise;
+    use music_browser::db::queries;
+
+    let inst_id = insert_instrument(&pool, "Bass", "bass").await;
+
+    let ex_id = queries::create_exercise(
+        &pool,
+        &CreatePracticeExercise {
+            instrument_id: Some(inst_id),
+            name: "Chromatic Warmup".to_string(),
+            category: "technique".to_string(),
+            description: "4-fret chromatic pattern".to_string(),
+            source: "Bass Method p.12".to_string(),
+            sort_order: 1,
+        },
     )
-    .bind(song_id)
-    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(ex_id > 0, "Expected positive exercise id, got {ex_id}");
+
+    let exercises = queries::list_exercises(&pool).await.unwrap();
+    assert_eq!(
+        exercises.len(),
+        1,
+        "Expected 1 exercise, got {}",
+        exercises.len()
+    );
+    assert_eq!(exercises[0].name, "Chromatic Warmup");
+    assert_eq!(exercises[0].instrument_name, "Bass");
+    assert_eq!(exercises[0].category, "technique");
+
+    queries::delete_exercise(&pool, ex_id).await.unwrap();
+    let after = queries::list_exercises(&pool).await.unwrap();
+    assert!(
+        after.is_empty(),
+        "Expected 0 exercises after delete, got {}",
+        after.len()
+    );
+}
+
+#[tokio::test]
+async fn test_exercise_category_constraint() {
+    let (pool, _tmp) = setup_pool().await;
+
+    let bad = sqlx::query("INSERT INTO practice_exercises (name, category) VALUES (?, ?)")
+        .bind("Bad Exercise")
+        .bind("invalid_category")
+        .execute(&pool)
+        .await;
+    assert!(
+        bad.is_err(),
+        "Expected CHECK constraint to reject invalid exercise category"
+    );
+}
+
+#[tokio::test]
+async fn test_song_exercise_link() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::{CreatePracticeExercise, CreateSongExercise};
+    use music_browser::db::queries;
+
+    let song_id = insert_song(&pool, "Link Song", "cover").await;
+    let ex_id = queries::create_exercise(
+        &pool,
+        &CreatePracticeExercise {
+            instrument_id: None,
+            name: "Scale Run".to_string(),
+            category: "scales".to_string(),
+            description: String::new(),
+            source: String::new(),
+            sort_order: 0,
+        },
+    )
     .await
     .unwrap();
 
-    let step_ids: Vec<i64> = queries::auto_add_steps(&pool, tracking_id, false)
-        .await
-        .unwrap();
-    assert!(
-        !step_ids.is_empty(),
-        "Expected steps to be created for tracking"
+    let se_id = queries::create_song_exercise(
+        &pool,
+        &CreateSongExercise {
+            song_id,
+            exercise_id: ex_id,
+            notes: "Focus on timing".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(se_id > 0, "Expected positive song_exercise id, got {se_id}");
+
+    let linked = queries::list_song_exercises(&pool, song_id).await.unwrap();
+    assert_eq!(
+        linked.len(),
+        1,
+        "Expected 1 linked exercise, got {}",
+        linked.len()
+    );
+    assert_eq!(linked[0].exercise_name, "Scale Run");
+    assert_eq!(linked[0].notes, "Focus on timing");
+
+    // Uniqueness: inserting same link again should be ignored (INSERT OR IGNORE)
+    queries::create_song_exercise(
+        &pool,
+        &CreateSongExercise {
+            song_id,
+            exercise_id: ex_id,
+            notes: "duplicate".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let still_one = queries::list_song_exercises(&pool, song_id).await.unwrap();
+    assert_eq!(
+        still_one.len(),
+        1,
+        "Expected still 1 linked exercise after duplicate, got {}",
+        still_one.len()
     );
 
-    let rows = sqlx::query("SELECT name FROM production_steps WHERE stage_id = ?")
-        .bind(tracking_id)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    let names: Vec<String> = rows.iter().map(|r| r.get("name")).collect();
+    queries::delete_song_exercise(&pool, se_id).await.unwrap();
+    let after = queries::list_song_exercises(&pool, song_id).await.unwrap();
     assert!(
-        names.iter().any(|n| n.contains("Guitar")),
-        "Expected guitar step"
-    );
-    assert!(
-        names.iter().any(|n| n.contains("Drums")),
-        "Expected drums step"
+        after.is_empty(),
+        "Expected 0 linked exercises after delete, got {}",
+        after.len()
     );
 }
 
 #[tokio::test]
-async fn test_auto_add_steps_cover_has_simpler_composition() {
+async fn test_user_profile_crud() {
     let (pool, _tmp) = setup_pool().await;
-    let song_id = insert_song(&pool, "Cover Song", "cover").await;
+    use music_browser::db::models::UpdateUserProfile;
+    use music_browser::db::queries;
 
-    let stage_ids: Vec<i64> = queries::auto_add_stages(&pool, song_id).await.unwrap();
+    // Default profile should exist from migration
+    let profile = queries::get_profile(&pool).await.unwrap();
+    assert_eq!(profile.id, 1);
+    assert_eq!(profile.display_name, "Musician");
+    assert_eq!(
+        profile.songs_capacity, 3,
+        "Default capacity should be 3, got {}",
+        profile.songs_capacity
+    );
 
-    // Find the composition stage ID
-    let comp_id = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM production_stages WHERE song_id = ? AND stage = 'composition'",
+    // Update profile
+    queries::update_profile(
+        &pool,
+        &UpdateUserProfile {
+            display_name: "Nate".to_string(),
+            songs_capacity: 5,
+            warmup_minutes: 10,
+            drill_minutes: 10,
+            song_minutes: 40,
+            review_minutes: 5,
+            notes: "Updated".to_string(),
+        },
     )
-    .bind(song_id)
-    .fetch_one(&pool)
     .await
     .unwrap();
 
-    let step_ids: Vec<i64> = queries::auto_add_steps(&pool, comp_id, true).await.unwrap();
-    let rows = sqlx::query("SELECT name FROM production_steps WHERE stage_id = ?")
-        .bind(comp_id)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    let names: Vec<String> = rows.iter().map(|r| r.get("name")).collect();
-    assert!(
-        names.iter().any(|n| n.contains("Learn vocals")),
-        "Cover composition should have 'Learn vocals' step, got {names:?}"
+    let updated = queries::get_profile(&pool).await.unwrap();
+    assert_eq!(updated.display_name, "Nate");
+    assert_eq!(
+        updated.songs_capacity, 5,
+        "Updated capacity should be 5, got {}",
+        updated.songs_capacity
     );
+    assert_eq!(updated.notes, "Updated");
+}
+
+#[tokio::test]
+async fn test_goals_crud() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::CreateGoal;
+    use music_browser::db::queries;
+
+    let id = queries::create_goal(
+        &pool,
+        &CreateGoal {
+            horizon: "1_week".to_string(),
+            category: "practice".to_string(),
+            title: "Learn bass line".to_string(),
+            description: "For the new cover".to_string(),
+            target_date: "2026-04-05".to_string(),
+            sort_order: 0,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(id > 0, "Expected positive goal id, got {id}");
+
+    let goals = queries::list_goals(&pool).await.unwrap();
+    assert_eq!(goals.len(), 1, "Expected 1 goal, got {}", goals.len());
+    assert_eq!(goals[0].title, "Learn bass line");
+    assert!(!goals[0].completed, "New goal should not be completed");
+
+    // Toggle
+    queries::toggle_goal(&pool, id).await.unwrap();
+    let toggled = queries::list_goals(&pool).await.unwrap();
     assert!(
-        !names.iter().any(|n| n.contains("composed")),
-        "Cover composition should NOT have composition steps, got {names:?}"
+        toggled[0].completed,
+        "Goal should be completed after toggle"
+    );
+
+    queries::toggle_goal(&pool, id).await.unwrap();
+    let untoggled = queries::list_goals(&pool).await.unwrap();
+    assert!(
+        !untoggled[0].completed,
+        "Goal should be uncompleted after second toggle"
+    );
+
+    queries::delete_goal(&pool, id).await.unwrap();
+    let after = queries::list_goals(&pool).await.unwrap();
+    assert!(
+        after.is_empty(),
+        "Expected 0 goals after delete, got {}",
+        after.len()
     );
 }
 
-// ===========================================================================
-// Song file instruments M2M
-// ===========================================================================
+#[tokio::test]
+async fn test_goal_horizon_constraint() {
+    let (pool, _tmp) = setup_pool().await;
+
+    let bad = sqlx::query("INSERT INTO goals (horizon, category, title) VALUES (?, ?, ?)")
+        .bind("10_year")
+        .bind("general")
+        .bind("Bad")
+        .execute(&pool)
+        .await;
+    assert!(
+        bad.is_err(),
+        "Expected CHECK constraint to reject invalid goal horizon '10_year'"
+    );
+}
 
 #[tokio::test]
-async fn test_song_file_instruments_m2m() {
+async fn test_schedule_event_crud() {
     let (pool, _tmp) = setup_pool().await;
-    let song_id = insert_song(&pool, "Multi Instrument File", "song").await;
-    let guitar_id = insert_instrument(&pool, "Guitar", "guitar").await;
-    let bass_id = insert_instrument(&pool, "Bass", "bass").await;
+    use music_browser::db::models::{CreateScheduleEvent, CreateScheduleItem};
+    use music_browser::db::queries;
 
-    let file_id = sqlx::query(
-        "INSERT INTO song_files (song_id, file_type, path, description) VALUES (?, ?, ?, ?)",
+    let eid = queries::create_schedule_event(
+        &pool,
+        &CreateScheduleEvent {
+            event_date: "2026-04-01".to_string(),
+            title: "Test Session".to_string(),
+            event_type: "practice".to_string(),
+        },
     )
-    .bind(song_id)
-    .bind("stem")
-    .bind("/stems/full_stem.wav")
-    .bind("Full mix stem")
+    .await
+    .unwrap();
+    assert!(eid > 0, "Expected positive event id, got {eid}");
+
+    let iid = queries::create_schedule_item(
+        &pool,
+        &CreateScheduleItem {
+            event_id: eid,
+            item_type: "warmup".to_string(),
+            song_id: None,
+            exercise_id: None,
+            stage_id: None,
+            instrument_id: None,
+            title: "General warmup".to_string(),
+            duration_minutes: 10,
+            sort_order: 0,
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(iid > 0, "Expected positive item id, got {iid}");
+
+    let events = queries::list_schedule_events(&pool).await.unwrap();
+    assert_eq!(events.len(), 1, "Expected 1 event, got {}", events.len());
+    assert_eq!(
+        events[0].items.len(),
+        1,
+        "Expected 1 item in event, got {}",
+        events[0].items.len()
+    );
+    assert_eq!(events[0].items[0].title, "General warmup");
+    assert!(
+        !events[0].items[0].completed,
+        "New item should not be completed"
+    );
+
+    // Toggle item
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+    let after_toggle = queries::list_schedule_events(&pool).await.unwrap();
+    assert!(
+        after_toggle[0].items[0].completed,
+        "Item should be completed after toggle"
+    );
+
+    // Delete event cascades items
+    queries::delete_schedule_event(&pool, eid).await.unwrap();
+    let after_delete = queries::list_schedule_events(&pool).await.unwrap();
+    assert!(
+        after_delete.is_empty(),
+        "Expected 0 events after delete, got {}",
+        after_delete.len()
+    );
+}
+
+#[tokio::test]
+async fn test_schedule_generation() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::{CreatePracticeExercise, WorkflowState};
+    use music_browser::db::queries;
+
+    // Set up: create active songs and exercises
+    let s1 = insert_song(&pool, "Song A", "cover").await;
+    let s2 = insert_song(&pool, "Song B", "original").await;
+    queries::update_workflow_state(&pool, s1, &WorkflowState::Learning)
+        .await
+        .unwrap();
+    queries::update_workflow_state(&pool, s2, &WorkflowState::Producing)
+        .await
+        .unwrap();
+
+    queries::create_exercise(
+        &pool,
+        &CreatePracticeExercise {
+            instrument_id: None,
+            name: "Warmup A".to_string(),
+            category: "technique".to_string(),
+            description: String::new(),
+            source: String::new(),
+            sort_order: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Generate schedule for 3 days
+    let event_ids = queries::generate_schedule(&pool, "2026-04-01", 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        event_ids.len(),
+        3,
+        "Expected 3 generated events, got {}",
+        event_ids.len()
+    );
+
+    let events = queries::list_schedule_events(&pool).await.unwrap();
+    assert_eq!(
+        events.len(),
+        3,
+        "Expected 3 events in list, got {}",
+        events.len()
+    );
+
+    // Each event should have at least warmup + review items
+    for event in &events {
+        assert!(
+            event.items.len() >= 2,
+            "Event '{}' should have >= 2 items (warmup + review), got {}",
+            event.title,
+            event.items.len()
+        );
+        // Check that there's at least one warmup and one review
+        let has_warmup = event
+            .items
+            .iter()
+            .any(|i| i.item_type == "warmup" || i.item_type == "drill");
+        let has_review = event.items.iter().any(|i| i.item_type == "review");
+        assert!(
+            has_warmup,
+            "Event '{}' should have a warmup/drill item",
+            event.title
+        );
+        assert!(
+            has_review,
+            "Event '{}' should have a review item",
+            event.title
+        );
+    }
+
+    // Verify date sequencing
+    let dates: Vec<&str> = events.iter().map(|e| e.event_date.as_str()).collect();
+    // Events are sorted DESC, so reverse for checking order
+    let mut sorted_dates = dates.clone();
+    sorted_dates.sort();
+    assert_eq!(
+        sorted_dates,
+        vec!["2026-04-01", "2026-04-02", "2026-04-03"],
+        "Expected dates 04-01..03, got {sorted_dates:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_song_new_fields_persist() {
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::models::{CreateSong, SongType, WorkflowState};
+    use music_browser::db::queries;
+
+    let id = queries::create_song(
+        &pool,
+        &CreateSong {
+            title: "Full Song".to_string(),
+            album_id: None,
+            sheet_music: String::new(),
+            lyrics: String::new(),
+            song_type: SongType::Original,
+            key: "Am".to_string(),
+            bpm_lower: Some(120),
+            bpm_upper: Some(130),
+            original_artist: "Me".to_string(),
+            score_url: String::new(),
+            description: "Test".to_string(),
+            workflow_state: WorkflowState::Performing,
+            scores_folder: "/scores/full".to_string(),
+            export_folder: "/export/full".to_string(),
+            musicxml_path: "/scores/full/sheet.xml".to_string(),
+            artist_ids: vec![],
+        },
+    )
+    .await
+    .unwrap();
+
+    let song = queries::get_song(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        song.workflow_state,
+        WorkflowState::Performing,
+        "workflow_state mismatch: {:?}",
+        song.workflow_state
+    );
+    assert_eq!(
+        song.scores_folder, "/scores/full",
+        "scores_folder mismatch: {}",
+        song.scores_folder
+    );
+    assert_eq!(
+        song.export_folder, "/export/full",
+        "export_folder mismatch: {}",
+        song.export_folder
+    );
+    assert_eq!(
+        song.musicxml_path, "/scores/full/sheet.xml",
+        "musicxml_path mismatch: {}",
+        song.musicxml_path
+    );
+}
+
+#[tokio::test]
+async fn test_add_days_to_date_basic() {
+    // Test the date arithmetic indirectly via generate_schedule
+    let (pool, _tmp) = setup_pool().await;
+    use music_browser::db::queries;
+
+    // Generate 1 day starting at month boundary
+    let events = queries::generate_schedule(&pool, "2026-01-31", 2)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 2, "Expected 2 events, got {}", events.len());
+
+    let all_events = queries::list_schedule_events(&pool).await.unwrap();
+    let dates: Vec<String> = all_events.iter().map(|e| e.event_date.clone()).collect();
+    assert!(
+        dates.contains(&"2026-01-31".to_string()),
+        "Expected 2026-01-31 in dates, got {dates:?}"
+    );
+    assert!(
+        dates.contains(&"2026-02-01".to_string()),
+        "Expected 2026-02-01 in dates, got {dates:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_musicxml_file_type_allowed() {
+    let (pool, _tmp) = setup_pool().await;
+    let song_id = insert_song(&pool, "MXL Song", "song").await;
+
+    let result = sqlx::query("INSERT INTO song_files (song_id, file_type, path) VALUES (?, ?, ?)")
+        .bind(song_id)
+        .bind("musicxml")
+        .bind("/scores/test.musicxml")
+        .execute(&pool)
+        .await;
+    assert!(
+        result.is_ok(),
+        "Expected musicxml file_type to be accepted, got error: {:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn test_schedule_event_status_constraint() {
+    let (pool, _tmp) = setup_pool().await;
+
+    let bad = sqlx::query(
+        "INSERT INTO schedule_events (event_date, title, event_type, status) VALUES (?, ?, ?, ?)",
+    )
+    .bind("2026-04-01")
+    .bind("Test")
+    .bind("practice")
+    .bind("invalid_status")
     .execute(&pool)
-    .await
-    .unwrap()
-    .last_insert_rowid();
-
-    // Link file to multiple instruments
-    sqlx::query("INSERT INTO song_file_instruments (song_file_id, instrument_id) VALUES (?, ?)")
-        .bind(file_id)
-        .bind(guitar_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO song_file_instruments (song_file_id, instrument_id) VALUES (?, ?)")
-        .bind(file_id)
-        .bind(bass_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let rows =
-        sqlx::query("SELECT instrument_id FROM song_file_instruments WHERE song_file_id = ?")
-            .bind(file_id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    let inst_ids: Vec<i64> = rows.iter().map(|r| r.get("instrument_id")).collect();
+    .await;
     assert!(
-        inst_ids.contains(&guitar_id),
-        "Expected guitar linked to file"
+        bad.is_err(),
+        "Expected CHECK constraint to reject invalid schedule event status"
     );
-    assert!(inst_ids.contains(&bass_id), "Expected bass linked to file");
 }

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Schedule{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>📅 Practice Schedule</h2>
+    <div style="display:flex; gap:.5rem; align-items:center;">
+        <a href="/schedule/export.ics" class="btn">📤 Export ICS</a>
+        <button class="btn btn-primary" onclick="document.getElementById('gen-form').style.display='block'">⚡ Schedule Upcoming</button>
+    </div>
+</div>
+
+<div id="gen-form" style="display:none; margin-bottom:1.5rem;">
+    <form method="post" action="/schedule/generate" class="form-card" style="max-width:400px;">
+        <div class="form-group">
+            <label for="start_date">Start Date</label>
+            <input type="date" id="start_date" name="start_date" required>
+        </div>
+        <div class="form-group">
+            <label for="num_days">Number of Days</label>
+            <input type="number" id="num_days" name="num_days" value="7" min="1" max="30">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Generate</button>
+            <button type="button" class="btn" onclick="document.getElementById('gen-form').style.display='none'">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var d = document.getElementById('start_date');
+        if (d && !d.value) {
+            d.value = new Date().toISOString().split('T')[0];
+        }
+    });
+</script>
+
+{% if events.is_empty() %}
+<p class="text-muted">No scheduled events yet. Click <strong>Schedule Upcoming</strong> to auto-generate a practice schedule based on your active songs and capacity.</p>
+{% else %}
+
+{% for event in events %}
+<div class="schedule-event {% if event.status == "completed" %}event-completed{% endif %}">
+    <div class="schedule-event-header">
+        <div>
+            <span class="schedule-date">{{ event.event_date }}</span>
+            <span class="schedule-title">{{ event.title }}</span>
+            <span class="meta-tag event-type-{{ event.event_type }}">{{ event.event_type }}</span>
+            <span class="meta-tag event-status-{{ event.status }}">{{ event.status }}</span>
+        </div>
+        <form method="post" action="/schedule/events/{{ event.id }}/delete" style="display:inline;"
+              onsubmit="return confirm('Delete this event and all its items?')">
+            <button type="submit" class="btn btn-sm btn-danger">🗑</button>
+        </form>
+    </div>
+    <div class="schedule-items">
+    {% for item in event.items %}
+        <div class="schedule-item {% if item.completed %}item-completed{% endif %} item-type-{{ item.item_type }}">
+            <form method="post" action="/schedule/items/{{ item.id }}/toggle" style="display:inline;">
+                <button type="submit" class="btn-check" title="Toggle">
+                    {% if item.completed %}✅{% else %}⬜{% endif %}
+                </button>
+            </form>
+            <div class="schedule-item-content">
+                <span class="schedule-item-title{% if item.completed %} line-through{% endif %}">{{ item.title }}</span>
+                <span class="schedule-item-duration">{{ item.duration_minutes }}min</span>
+            </div>
+            <div class="schedule-item-meta">
+                {% if !item.song_title.is_empty() %}<span class="meta-tag">🎵 {{ item.song_title }}</span>{% endif %}
+                {% if !item.exercise_name.is_empty() %}<span class="meta-tag">🏋️ {{ item.exercise_name }}</span>{% endif %}
+                {% if !item.instrument_name.is_empty() %}<span class="meta-tag">🎸 {{ item.instrument_name }}</span>{% endif %}
+                {% if !item.stage_name.is_empty() %}<span class="meta-tag">🎛️ {{ item.stage_name }}</span>{% endif %}
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<style>
+.schedule-event { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:1rem; overflow:hidden; }
+.schedule-event.event-completed { opacity:.7; }
+.schedule-event-header { display:flex; justify-content:space-between; align-items:center; padding:.75rem; border-bottom:1px solid var(--border); }
+.schedule-date { font-weight:700; font-size:1.05rem; margin-right:.5rem; }
+.schedule-title { color:var(--text-muted); margin-right:.5rem; }
+.schedule-items { padding:.5rem; }
+.schedule-item { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; padding:.4rem .5rem; border-radius:4px; margin-bottom:.2rem; }
+.schedule-item.item-completed { opacity:.65; }
+.schedule-item:hover { background:var(--bg); }
+.schedule-item-content { display:flex; align-items:center; gap:.5rem; flex:1; min-width:200px; }
+.schedule-item-title { font-size:.9rem; }
+.schedule-item-title.line-through { text-decoration:line-through; }
+.schedule-item-duration { font-size:.75rem; color:var(--text-muted); white-space:nowrap; }
+.schedule-item-meta { display:flex; gap:.25rem; flex-wrap:wrap; }
+.item-type-warmup { border-left:3px solid #f59e0b; }
+.item-type-drill { border-left:3px solid #8b5cf6; }
+.item-type-song_practice { border-left:3px solid #10b981; }
+.item-type-song_production { border-left:3px solid #e94560; }
+.item-type-exercise { border-left:3px solid #06b6d4; }
+.item-type-review { border-left:3px solid #6366f1; }
+.event-type-practice { background:#10b98122; color:#059669; }
+.event-type-production { background:#f59e0b22; color:#d97706; }
+.event-type-mixed { background:#6366f122; color:#6366f1; }
+.event-status-planned { background:#3b82f622; color:#3b82f6; }
+.event-status-in_progress { background:#f59e0b22; color:#d97706; }
+.event-status-completed { background:#10b98122; color:#059669; }
+.event-status-skipped { background:#ef444422; color:#ef4444; }
+@media print {
+    form, .btn, #gen-form { display:none !important; }
+    .schedule-event { break-inside:avoid; page-break-inside:avoid; }
+}
+</style>
+{% endblock %}
