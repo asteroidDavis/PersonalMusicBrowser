@@ -1126,6 +1126,165 @@ pub async fn create_sample(pool: &SqlitePool, input: &CreateSample) -> Result<i6
     Ok(sample_id)
 }
 
+// ============================================================================
+// Auto-populate standard stages and steps
+// ============================================================================
+
+const STANDARD_STAGES: &[&str] = &[
+    "writing",
+    "composition",
+    "tracking",
+    "mixing",
+    "mastering",
+    "publishing",
+    "performing",
+];
+
+/// Create all 7 standard production stages for a song (skips duplicates).
+pub async fn auto_add_stages(pool: &SqlitePool, song_id: i64) -> Result<Vec<i64>, sqlx::Error> {
+    let mut ids = Vec::new();
+    for stage in STANDARD_STAGES {
+        let result = sqlx::query(
+            "INSERT OR IGNORE INTO production_stages (song_id, stage, status) VALUES (?, ?, 'not_started')",
+        )
+        .bind(song_id)
+        .bind(stage)
+        .execute(pool)
+        .await?;
+        let id = result.last_insert_rowid();
+        if id > 0 {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Return the default step names for a given stage, accounting for song type.
+/// `is_cover` should be true for covers, false for originals.
+pub fn default_steps_for_stage(
+    stage: &str,
+    is_cover: bool,
+) -> Vec<(&'static str, Option<&'static str>)> {
+    // Returns (step_name, optional_instrument_type) pairs
+    match stage {
+        "writing" => vec![
+            ("Track demo / steel thread", None),
+            ("Brainstormed words", None),
+            ("Cringe tested", None),
+        ],
+        "composition" if !is_cover => vec![
+            ("Track demo / steel thread", None),
+            ("Automated note detection", None),
+            ("Fix note detection errors", None),
+            ("Sight read", None),
+            ("Learn part by ear", None),
+            ("Guitar composed", Some("guitar")),
+            ("Bass composed", Some("bass")),
+            ("Vocals composed", Some("vocals")),
+            ("Vocal harmony composed", Some("vocals")),
+            ("Drums composed", Some("drums")),
+            ("Piano composed", Some("piano")),
+        ],
+        "composition" => vec![
+            // Cover composition
+            ("Track demo / steel thread", None),
+            ("Automated note detection", None),
+            ("Fix note detection errors", None),
+            ("Sight read", None),
+            ("Learn vocals", Some("vocals")),
+        ],
+        "tracking" => vec![
+            ("Tempo tracked", None),
+            ("Steel thread tracked", None),
+            ("Guitar tracked", Some("guitar")),
+            ("Guitar pedal automation tracked", Some("guitar")),
+            ("Bass tracked", Some("bass")),
+            ("Bass pedal automation tracked", Some("bass")),
+            ("Vocals tracked", Some("vocals")),
+            ("Vocal FX automation tracked", Some("vocals")),
+            ("Drums tracked", Some("drums")),
+            ("Drums reviewed", Some("drums")),
+            ("Drum pedal automation tracked", Some("drums")),
+            ("Piano tracked", Some("piano")),
+            ("Piano pedal/FX automation tracked", Some("piano")),
+        ],
+        "mixing" => vec![
+            ("Rough mix balance", None),
+            ("EQ pass", None),
+            ("Compression pass", None),
+            ("Effects / sends", None),
+            ("Automation pass", None),
+            ("Reference check", None),
+            ("Mix bounce", None),
+        ],
+        "mastering" => vec![
+            ("Import final mix", None),
+            ("Loudness / LUFS target", None),
+            ("EQ / tonal balance", None),
+            ("Stereo imaging", None),
+            ("Limiting / final ceiling", None),
+            ("A/B reference comparison", None),
+            ("Format exports (WAV, MP3, FLAC)", None),
+        ],
+        "publishing" => vec![
+            ("Metadata (title, artist, album, ISRC)", None),
+            ("Cover art finalized", None),
+            ("Distribution upload (DistroKid / CDBaby / etc.)", None),
+            ("Streaming platform verification", None),
+            ("Social media announcement", None),
+            ("Lyrics submission (Genius / Musixmatch)", None),
+        ],
+        "performing" => vec![
+            ("Arrangement finalized for live", None),
+            ("Backing track prepared", None),
+            ("Click track / in-ear mix", None),
+            ("Rehearsed with band", None),
+            ("Setlist placement decided", None),
+            ("Stage plot / tech rider updated", None),
+        ],
+        _ => vec![],
+    }
+}
+
+/// Create default steps for a given stage. Looks up instrument_id by type if provided.
+pub async fn auto_add_steps(
+    pool: &SqlitePool,
+    stage_id: i64,
+    is_cover: bool,
+) -> Result<Vec<i64>, sqlx::Error> {
+    // Look up stage name
+    let stage_name: String = sqlx::query_scalar("SELECT stage FROM production_stages WHERE id = ?")
+        .bind(stage_id)
+        .fetch_one(pool)
+        .await?;
+
+    let steps = default_steps_for_stage(&stage_name, is_cover);
+    let mut ids = Vec::new();
+    for (i, (name, inst_type)) in steps.iter().enumerate() {
+        let instrument_id: Option<i64> = if let Some(itype) = inst_type {
+            sqlx::query_scalar("SELECT id FROM instruments WHERE instrument_type = ? LIMIT 1")
+                .bind(itype)
+                .fetch_optional(pool)
+                .await?
+        } else {
+            None
+        };
+
+        let result = sqlx::query(
+            "INSERT INTO production_steps (stage_id, instrument_id, name, status, sort_order) \
+             VALUES (?, ?, ?, 'not_started', ?)",
+        )
+        .bind(stage_id)
+        .bind(instrument_id)
+        .bind(name)
+        .bind(i as i32)
+        .execute(pool)
+        .await?;
+        ids.push(result.last_insert_rowid());
+    }
+    Ok(ids)
+}
+
 pub async fn delete_sample(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM sample_instruments WHERE sample_id = ?")
         .bind(id)

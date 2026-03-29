@@ -22,7 +22,7 @@
                 <td>{% if s.sheet_music.is_empty() %}—{% else %}{{ s.sheet_music }}{% endif %}</td>
                 <td>{% if s.artist_names.is_empty() %}—{% else %}{{ s.artist_names }}{% endif %}</td>
                 <td class="actions">
-                    <a href="/songs/{{ s.id }}/edit" class="btn btn-sm">Edit</a>
+                    <a href="/songs/{{ s.id }}/edit?return_to=/" class="btn btn-sm">Edit</a>
                     <form method="post" action="/songs/{{ s.id }}/delete" style="display:inline">
                         <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                     </form>

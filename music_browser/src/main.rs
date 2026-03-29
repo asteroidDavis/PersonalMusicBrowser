@@ -8,6 +8,19 @@ use sqlx::SqlitePool;
 use music_browser::db::models::*;
 use music_browser::db::queries;
 
+/// Extract the `Referer` header from a request, falling back to `default`.
+fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
+    let loc = req
+        .headers()
+        .get("referer")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or(default)
+        .to_string();
+    HttpResponse::SeeOther()
+        .insert_header(("Location", loc))
+        .finish()
+}
+
 // ---------------------------------------------------------------------------
 // QsForm: a form extractor that uses serde_qs instead of serde_urlencoded.
 // This correctly handles repeated keys (checkbox arrays) and treats empty
@@ -69,6 +82,7 @@ struct SongFormTemplate {
     description: String,
     albums: Vec<Album>,
     artists: Vec<ArtistRow>,
+    return_to: String,
 }
 
 struct ArtistRow {
@@ -251,6 +265,7 @@ struct StepFormTemplate {
 struct SongFileFormTemplate {
     song_title: String,
     instruments: Vec<Instrument>,
+    return_to: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +296,8 @@ struct SongFormData {
     description: String,
     #[serde(default)]
     artist_ids: Vec<i64>,
+    #[serde(default)]
+    return_to: String,
 }
 
 #[derive(Deserialize)]
@@ -344,6 +361,8 @@ struct SongFileFormData {
     instrument_id: Option<i64>,
     #[serde(default)]
     description: String,
+    #[serde(default)]
+    return_to: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +427,7 @@ async fn song_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse
                 selected: false,
             })
             .collect(),
+        return_to: String::new(),
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -445,8 +465,10 @@ async fn song_create(
 async fn song_edit(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    query: web::Query<std::collections::HashMap<String, String>>,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
+    let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?
@@ -486,6 +508,7 @@ async fn song_edit(
                 }
             })
             .collect(),
+        return_to,
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -515,8 +538,13 @@ async fn song_update(
     queries::update_song(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    let loc = if form.return_to.is_empty() {
+        "/".to_string()
+    } else {
+        form.return_to.clone()
+    };
     Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/"))
+        .insert_header(("Location", loc))
         .finish())
 }
 
@@ -905,6 +933,7 @@ async fn stage_new(
 }
 
 async fn stage_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StageFormData>,
@@ -919,12 +948,11 @@ async fn stage_create(
     queries::create_production_stage(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
 }
 
 async fn stage_update_status(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
@@ -933,21 +961,18 @@ async fn stage_update_status(
     queries::update_production_stage_status(&pool, path.into_inner(), &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
 }
 
 async fn stage_delete(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_production_stage(&pool, path.into_inner())
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
 }
 
 async fn step_new(
@@ -979,6 +1004,7 @@ async fn step_new(
 }
 
 async fn step_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StepFormData>,
@@ -996,12 +1022,11 @@ async fn step_create(
     queries::create_production_step(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
 }
 
 async fn step_update_status(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
@@ -1010,16 +1035,16 @@ async fn step_update_status(
     queries::update_production_step_status(&pool, path.into_inner(), &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
 }
 
 async fn song_file_new(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    query: web::Query<std::collections::HashMap<String, String>>,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
+    let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, song_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?
@@ -1031,6 +1056,7 @@ async fn song_file_new(
     let body = SongFileFormTemplate {
         song_title: song.title,
         instruments,
+        return_to,
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1053,21 +1079,64 @@ async fn song_file_create(
     queries::create_song_file(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    let loc = if form.return_to.is_empty() {
+        "/production".to_string()
+    } else {
+        form.return_to.clone()
+    };
     Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
+        .insert_header(("Location", loc))
         .finish())
 }
 
 async fn song_file_delete(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_song_file(&pool, path.into_inner())
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/production"))
-        .finish())
+    Ok(redirect_back(&req, "/production"))
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — Auto-populate stages & steps
+// ---------------------------------------------------------------------------
+
+async fn auto_add_stages(
+    req: HttpRequest,
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::auto_add_stages(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(redirect_back(&req, "/production"))
+}
+
+async fn auto_add_steps(
+    req: HttpRequest,
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    let stage_id = path.into_inner();
+    // Determine if the song is a cover to pick the right composition steps
+    let is_cover: bool = sqlx::query_scalar(
+        "SELECT CASE WHEN s.song_type = 'cover' THEN 1 ELSE 0 END \
+         FROM production_stages ps JOIN songs s ON s.id = ps.song_id \
+         WHERE ps.id = ?",
+    )
+    .bind(stage_id)
+    .fetch_one(pool.get_ref())
+    .await
+    .map(|v: i32| v == 1)
+    .unwrap_or(false);
+
+    queries::auto_add_steps(&pool, stage_id, is_cover)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(redirect_back(&req, "/production"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,6 +1271,15 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
         .route(
             "/production/files/{id}/delete",
             web::post().to(song_file_delete),
+        )
+        // Auto-populate stages & steps
+        .route(
+            "/production/songs/{id}/stages/auto",
+            web::post().to(auto_add_stages),
+        )
+        .route(
+            "/production/stages/{id}/steps/auto",
+            web::post().to(auto_add_steps),
         )
         // Practice
         .route("/practice", web::get().to(practice_list));
