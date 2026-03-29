@@ -1,0 +1,20 @@
+[package]
+name = "music-browser-backup"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "music-browser-backup"
+path = "src/backup_main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.11"
+dotenvy = "0.15"
+clap = { version = "4", features = ["derive"] }
+chrono = "0.8"
+shellexpand = "3.1"
+
+# Optional SMB support
+# smbclient = "0.1"  # Uncomment if you find a suitable SMB client library

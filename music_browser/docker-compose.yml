@@ -1,0 +1,36 @@
+# PersonalMusicBrowser Docker Compose
+
+version: '3.8'
+
+services:
+  music-browser:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=sqlite:/data/music_browser.db
+      - BIND_ADDR=0.0.0.0:3000
+      - RUST_LOG=info
+      - BACKUP_DIR=/data/backups
+      - BACKUP_SMB_PATH=${BACKUP_SMB_PATH:-}
+    volumes:
+      - music_data:/data
+    restart: unless-stopped
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    environment:
+      - BACKUP_DIR=/data/backups
+      - BACKUP_SMB_PATH=${BACKUP_SMB_PATH:-}
+    volumes:
+      - music_data:/data
+    depends_on:
+      - music-browser
+    restart: unless-stopped
+    # Run backup daily at 2 AM
+    command: --cron "0 2 * * *"
+
+volumes:
+  music_data:
