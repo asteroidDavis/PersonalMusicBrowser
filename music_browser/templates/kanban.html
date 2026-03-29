@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Song Workflow Board{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>🎯 Song Workflow Board</h2>
+</div>
+<p class="text-muted" style="margin-bottom:1rem;">Drag songs between columns to update their workflow state, or use the dropdown.</p>
+
+<div class="kanban-board" id="kanban-board">
+{% for col in columns %}
+    <div class="kanban-col" data-state="{{ col.state }}"
+         ondragover="event.preventDefault(); this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="handleDrop(event, '{{ col.state }}'); this.classList.remove('drag-over')">
+        <div class="kanban-col-header">
+            <span>{{ col.emoji }} {{ col.label }}</span>
+            <span class="kanban-count">{{ col.songs.len() }}</span>
+        </div>
+        <div class="kanban-cards">
+        {% for song in col.songs %}
+            <div class="kanban-card" draggable="true" data-song-id="{{ song.id }}"
+                 ondragstart="event.dataTransfer.setData('text/plain', '{{ song.id }}')">
+                <div class="kanban-card-title">{{ song.title }}</div>
+                {% if !song.original_artist.is_empty() %}
+                <div class="kanban-card-meta">by {{ song.original_artist }}</div>
+                {% endif %}
+                <div class="kanban-card-tags">
+                    <span class="song-type-badge badge-{{ song.song_type }}">{{ song.song_type }}</span>
+                    {% if !song.key.is_empty() %}<span class="meta-tag">{{ song.key }}</span>{% endif %}
+                    {% if !song.bpm.is_empty() %}<span class="meta-tag">{{ song.bpm }} bpm</span>{% endif %}
+                </div>
+                {% if !song.scores_folder.is_empty() || !song.musicxml_path.is_empty() %}
+                <div class="kanban-card-links">
+                    {% if !song.scores_folder.is_empty() %}<span class="meta-tag">📁 Scores</span>{% endif %}
+                    {% if !song.musicxml_path.is_empty() %}<span class="meta-tag">🎼 MusicXML</span>{% endif %}
+                    {% if !song.export_folder.is_empty() %}<span class="meta-tag">📦 Export</span>{% endif %}
+                </div>
+                {% endif %}
+                <form method="post" action="/workflow/songs/{{ song.id }}/state" class="kanban-card-form">
+                    <select name="workflow_state" class="status-select" onchange="this.form.submit()">
+                    {% for s in all_states %}
+                        <option value="{{ s.0 }}"{% if s.0 == col.state %} selected{% endif %}>{{ s.1 }}</option>
+                    {% endfor %}
+                    </select>
+                </form>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+{% endfor %}
+</div>
+
+<script>
+async function handleDrop(event, targetState) {
+    event.preventDefault();
+    const songId = event.dataTransfer.getData('text/plain');
+    if (!songId) return;
+    try {
+        const resp = await fetch(`/api/workflow/songs/${songId}/state`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({workflow_state: targetState})
+        });
+        if (resp.ok) location.reload();
+    } catch (e) {
+        console.error('Failed to update workflow state', e);
+    }
+}
+</script>
+
+<style>
+.kanban-board { display:flex; gap:.75rem; overflow-x:auto; padding-bottom:1rem; min-height:60vh; }
+.kanban-col { min-width:200px; flex:1; background:var(--surface); border-radius:var(--radius); display:flex; flex-direction:column; }
+.kanban-col.drag-over { outline:2px dashed var(--accent); }
+.kanban-col-header { padding:.75rem; font-weight:700; font-size:.95rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.kanban-count { background:var(--primary); padding:.15rem .5rem; border-radius:10px; font-size:.75rem; }
+.kanban-cards { padding:.5rem; flex:1; display:flex; flex-direction:column; gap:.5rem; }
+.kanban-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); padding:.6rem; cursor:grab; transition:box-shadow .2s; }
+.kanban-card:hover { box-shadow:0 2px 8px rgba(233,69,96,.15); }
+.kanban-card:active { cursor:grabbing; }
+.kanban-card-title { font-weight:600; font-size:.9rem; margin-bottom:.25rem; }
+.kanban-card-meta { font-size:.75rem; color:var(--text-muted); margin-bottom:.3rem; }
+.kanban-card-tags { display:flex; flex-wrap:wrap; gap:.25rem; margin-bottom:.3rem; }
+.kanban-card-links { display:flex; flex-wrap:wrap; gap:.25rem; margin-bottom:.3rem; }
+.kanban-card-form { margin-top:.3rem; }
+@media print { .kanban-card-form { display:none; } }
+</style>
+{% endblock %}

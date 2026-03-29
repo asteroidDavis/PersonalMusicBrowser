@@ -89,6 +89,13 @@ pub struct Song {
     pub original_artist: String,
     pub score_url: String,
     pub description: String,
+    pub workflow_state: WorkflowState,
+    pub scores_folder: String,
+    pub export_folder: String,
+    pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artists: Vec<Artist>,
 }
 
@@ -352,6 +359,13 @@ pub struct CreateSong {
     pub original_artist: String,
     pub score_url: String,
     pub description: String,
+    pub workflow_state: WorkflowState,
+    pub scores_folder: String,
+    pub export_folder: String,
+    pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
 }
 
@@ -368,6 +382,12 @@ pub struct UpdateSong {
     pub original_artist: String,
     pub score_url: String,
     pub description: String,
+    pub scores_folder: String,
+    pub export_folder: String,
+    pub musicxml_path: String,
+    pub practice_project_path: String,
+    pub time_signature: String,
+    pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
 }
 
@@ -465,4 +485,288 @@ pub struct CreateSample {
     pub key: String,
     pub description: String,
     pub instrument_ids: Vec<i64>,
+}
+
+// ============================================================================
+// Workflow state machine for songs
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WorkflowState {
+    Discovered,
+    Learning,
+    Shaky,
+    Performing,
+    Producing,
+    CoverRecording,
+    Complete,
+}
+
+impl WorkflowState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WorkflowState::Discovered => "discovered",
+            WorkflowState::Learning => "learning",
+            WorkflowState::Shaky => "shaky",
+            WorkflowState::Performing => "performing",
+            WorkflowState::Producing => "producing",
+            WorkflowState::CoverRecording => "cover_recording",
+            WorkflowState::Complete => "complete",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<WorkflowState> {
+        match s {
+            "discovered" => Some(WorkflowState::Discovered),
+            "learning" => Some(WorkflowState::Learning),
+            "shaky" => Some(WorkflowState::Shaky),
+            "performing" => Some(WorkflowState::Performing),
+            "producing" => Some(WorkflowState::Producing),
+            "cover_recording" => Some(WorkflowState::CoverRecording),
+            "complete" => Some(WorkflowState::Complete),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            WorkflowState::Discovered => "Discovered",
+            WorkflowState::Learning => "Learning",
+            WorkflowState::Shaky => "Shaky",
+            WorkflowState::Performing => "Performing",
+            WorkflowState::Producing => "Producing",
+            WorkflowState::CoverRecording => "Cover Recording",
+            WorkflowState::Complete => "Complete",
+        }
+    }
+
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            WorkflowState::Discovered => "🔍",
+            WorkflowState::Learning => "📖",
+            WorkflowState::Shaky => "🫨",
+            WorkflowState::Performing => "🎤",
+            WorkflowState::Producing => "🎛️",
+            WorkflowState::CoverRecording => "🎙️",
+            WorkflowState::Complete => "✅",
+        }
+    }
+
+    pub fn all() -> &'static [WorkflowState] {
+        &[
+            WorkflowState::Discovered,
+            WorkflowState::Learning,
+            WorkflowState::Shaky,
+            WorkflowState::Performing,
+            WorkflowState::Producing,
+            WorkflowState::CoverRecording,
+            WorkflowState::Complete,
+        ]
+    }
+}
+
+impl std::fmt::Display for WorkflowState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+// ============================================================================
+// Practice exercises
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeExercise {
+    pub id: i64,
+    pub instrument_id: Option<i64>,
+    pub instrument_name: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub source: String,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePracticeExercise {
+    pub instrument_id: Option<i64>,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub source: String,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SongExercise {
+    pub id: i64,
+    pub song_id: i64,
+    pub exercise_id: i64,
+    pub exercise_name: String,
+    pub instrument_name: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateSongExercise {
+    pub song_id: i64,
+    pub exercise_id: i64,
+    pub notes: String,
+}
+
+// ============================================================================
+// User profile
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UserProfile {
+    pub id: i64,
+    pub display_name: String,
+    pub songs_capacity: i32,
+    pub warmup_minutes: i32,
+    pub drill_minutes: i32,
+    pub song_minutes: i32,
+    pub review_minutes: i32,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateUserProfile {
+    pub display_name: String,
+    pub songs_capacity: i32,
+    pub warmup_minutes: i32,
+    pub drill_minutes: i32,
+    pub song_minutes: i32,
+    pub review_minutes: i32,
+    pub notes: String,
+}
+
+// ============================================================================
+// Goals — hierarchical planning
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Goal {
+    pub id: i64,
+    pub horizon: String,
+    pub category: String,
+    pub title: String,
+    pub description: String,
+    pub target_date: String,
+    pub completed: bool,
+    pub created_at: String,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGoal {
+    pub horizon: String,
+    pub category: String,
+    pub title: String,
+    pub description: String,
+    pub target_date: String,
+    pub sort_order: i32,
+}
+
+// ============================================================================
+// Schedule events & items
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScheduleEvent {
+    pub id: i64,
+    pub event_date: String,
+    pub title: String,
+    pub event_type: String,
+    pub status: String,
+    pub notes: String,
+    pub created_at: String,
+    pub items: Vec<ScheduleItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScheduleItem {
+    pub id: i64,
+    pub event_id: i64,
+    pub item_type: String,
+    pub song_id: Option<i64>,
+    pub song_title: String,
+    pub exercise_id: Option<i64>,
+    pub exercise_name: String,
+    pub stage_id: Option<i64>,
+    pub stage_name: String,
+    pub instrument_id: Option<i64>,
+    pub instrument_name: String,
+    pub title: String,
+    pub duration_minutes: i32,
+    pub sort_order: i32,
+    pub completed: bool,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateScheduleEvent {
+    pub event_date: String,
+    pub title: String,
+    pub event_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateScheduleItem {
+    pub event_id: i64,
+    pub item_type: String,
+    pub song_id: Option<i64>,
+    pub exercise_id: Option<i64>,
+    pub stage_id: Option<i64>,
+    pub instrument_id: Option<i64>,
+    pub title: String,
+    pub duration_minutes: i32,
+    pub sort_order: i32,
+    pub notes: String,
+}
+
+// ============================================================================
+// Live sets — ordered groupings for live performance or album practice
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveSet {
+    pub id: i64,
+    pub name: String,
+    pub set_type: String,
+    pub description: String,
+    pub target_duration_seconds: i32,
+    pub created_at: String,
+    pub songs: Vec<LiveSetSong>,
+    pub actual_duration_seconds: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveSetSong {
+    pub id: i64,
+    pub set_id: i64,
+    pub song_id: i64,
+    pub song_title: String,
+    pub sort_order: i32,
+    pub backing_track_path: String,
+    pub duration_seconds: i32,
+    pub transition_notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLiveSet {
+    pub name: String,
+    pub set_type: String,
+    pub description: String,
+    pub target_duration_seconds: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLiveSetSong {
+    pub set_id: i64,
+    pub song_id: i64,
+    pub sort_order: i32,
+    pub backing_track_path: String,
+    pub duration_seconds: i32,
+    pub transition_notes: String,
 }
