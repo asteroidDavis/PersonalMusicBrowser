@@ -15,14 +15,27 @@
     <span>📈 Exceptional</span>
 </div>
 
+{# ── Filter bar ── #}
+<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0;align-items:center;">
+    <label style="font-weight:600;font-size:.9em;">Filter:</label>
+    <button class="btn btn-sm filter-btn active" data-filter="all">All</button>
+    <button class="btn btn-sm filter-btn" data-filter="song">Song</button>
+    <button class="btn btn-sm filter-btn" data-filter="cover">Cover</button>
+    <button class="btn btn-sm filter-btn" data-filter="original">Original</button>
+    <button class="btn btn-sm filter-btn" data-filter="composition">Composition</button>
+    <button class="btn btn-sm filter-btn" data-filter="practice">Practice</button>
+    <span style="margin-left:auto;font-size:.85em;" class="text-muted">{{ songs.len() }} songs</span>
+</div>
+
 {% if songs.is_empty() %}
     <p class="empty">No songs yet. <a href="/songs/new" style="color:var(--accent)">Add one?</a></p>
 {% else %}
 
 {% for entry in songs %}
-<div class="prod-card">
-    <div class="prod-card-header">
+<details class="prod-card" data-song-type="{{ entry.song_type }}" open>
+    <summary class="prod-card-header" style="cursor:pointer;list-style:none;">
         <h3>
+            <span style="font-size:.8em;opacity:.5;">▶</span>
             <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
             {{ entry.title }}
             {% if !entry.original_artist.is_empty() %}<span class="text-muted"> — {{ entry.original_artist }}</span>{% endif %}
@@ -34,14 +47,21 @@
         </div>
         <div class="prod-card-actions">
             <a href="/production/songs/{{ entry.song_id }}/stages/new" class="btn btn-sm">+ Stage</a>
+            <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
+                <button type="submit" class="btn btn-sm" title="Add all 7 standard stages">⚡ Auto Stages</button>
+            </form>
             <a href="/production/songs/{{ entry.song_id }}/files/new" class="btn btn-sm">+ File</a>
             <a href="/songs/{{ entry.song_id }}/edit" class="btn btn-sm">Edit Song</a>
         </div>
-    </div>
+    </summary>
 
     {% if entry.stages.is_empty() %}
         <p class="count" style="padding:.5rem 0">No production stages defined.
             <a href="/production/songs/{{ entry.song_id }}/stages/new" style="color:var(--accent)">Add stages?</a>
+            or
+            <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
+                <button type="submit" class="btn btn-sm" style="font-size:.8em">⚡ Auto-add all 7 stages</button>
+            </form>
         </p>
     {% else %}
     <table class="prod-table">
@@ -88,6 +108,11 @@
                         </span>
                     {% endfor %}
                     <a href="/production/stages/{{ stage.id }}/steps/new" class="btn btn-sm" style="font-size:.7rem;padding:.15rem .4rem">+ Step</a>
+                    {% if stage.steps.is_empty() %}
+                    <form method="post" action="/production/stages/{{ stage.id }}/steps/auto" style="display:inline;margin:0">
+                        <button type="submit" class="btn btn-sm" style="font-size:.7rem;padding:.15rem .4rem" title="Add default steps for this stage">⚡ Auto</button>
+                    </form>
+                    {% endif %}
                 </td>
                 <td class="actions">
                     <form method="post" action="/production/stages/{{ stage.id }}/delete">
@@ -107,7 +132,7 @@
         {% for f in entry.files %}
             <li>
                 <span class="file-type">{{ f.file_type }}</span>
-                <code>{{ f.path }}</code>
+                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<span class="text-muted"> — {{ f.description }}</span>{% endif %}
                 <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form">
@@ -118,8 +143,21 @@
         </ul>
     </details>
     {% endif %}
-</div>
+</details>
 {% endfor %}
 
 {% endif %}
+
+<script>
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const f = btn.dataset.filter;
+        document.querySelectorAll('.prod-card[data-song-type]').forEach(card => {
+            card.style.display = (f === 'all' || card.dataset.songType === f) ? '' : 'none';
+        });
+    });
+});
+</script>
 {% endblock %}

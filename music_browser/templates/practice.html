@@ -5,12 +5,24 @@
     <h2>🎸 Practice</h2>
 </div>
 
+{# ── Filter bar ── #}
+<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0;align-items:center;">
+    <label style="font-weight:600;font-size:.9em;">Filter:</label>
+    <button class="btn btn-sm filter-btn active" data-filter="all">All</button>
+    <button class="btn btn-sm filter-btn" data-filter="song">Song</button>
+    <button class="btn btn-sm filter-btn" data-filter="cover">Cover</button>
+    <button class="btn btn-sm filter-btn" data-filter="original">Original</button>
+    <button class="btn btn-sm filter-btn" data-filter="composition">Composition</button>
+    <button class="btn btn-sm filter-btn" data-filter="practice">Practice</button>
+    <span style="margin-left:auto;font-size:.85em;" class="text-muted">{{ songs.len() }} songs</span>
+</div>
+
 {% if songs.is_empty() %}
     <p class="empty">No songs yet. <a href="/songs/new" style="color:var(--accent)">Add one?</a></p>
 {% else %}
 
 {% for entry in songs %}
-<div class="practice-card">
+<div class="practice-card" data-song-type="{{ entry.song_type }}">
     <div class="practice-card-header">
         <h3>
             <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
@@ -71,7 +83,7 @@
         {% for f in entry.files %}
             <div class="file-card">
                 <span class="file-type-badge">{{ f.file_type }}</span>
-                <code>{{ f.path }}</code>
+                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<p class="text-muted">{{ f.description }}</p>{% endif %}
             </div>
@@ -83,4 +95,17 @@
 {% endfor %}
 
 {% endif %}
+
+<script>
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const f = btn.dataset.filter;
+        document.querySelectorAll('.practice-card[data-song-type]').forEach(card => {
+            card.style.display = (f === 'all' || card.dataset.songType === f) ? '' : 'none';
+        });
+    });
+});
+</script>
 {% endblock %}
