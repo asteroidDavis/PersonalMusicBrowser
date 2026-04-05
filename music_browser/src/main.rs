@@ -1336,18 +1336,14 @@ struct ExercisesTemplate {
 
 #[derive(Template)]
 #[template(path = "exercise_form.html")]
-struct ExerciseFormTemplate {
-    instruments: Vec<Instrument>,
-}
+struct ExerciseFormTemplate {}
 
 #[derive(Deserialize)]
 struct ExerciseFormData {
-    instrument_id: Option<i64>,
-    name: String,
+    exercise_list: String,
     category: String,
     description: String,
     source: String,
-    sort_order: i32,
 }
 
 async fn exercise_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
@@ -1360,11 +1356,8 @@ async fn exercise_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpRes
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-async fn exercise_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
-    let instruments = queries::list_instruments(&pool)
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = ExerciseFormTemplate { instruments }
+async fn exercise_new(_pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+    let body = ExerciseFormTemplate {}
         .render()
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
@@ -1375,19 +1368,32 @@ async fn exercise_create(
     form: QsForm<ExerciseFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
-    queries::create_exercise(
-        &pool,
-        &CreatePracticeExercise {
-            instrument_id: f.instrument_id,
-            name: f.name,
-            category: f.category,
-            description: f.description,
-            source: f.source,
-            sort_order: f.sort_order,
-        },
-    )
-    .await
-    .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    // Parse line-separated exercise names
+    let exercise_names: Vec<&str> = f
+        .exercise_list
+        .lines()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Create each exercise with auto-incrementing sort_order
+    for (i, name) in exercise_names.iter().enumerate() {
+        queries::create_exercise(
+            &pool,
+            &CreatePracticeExercise {
+                instrument_id: None, // No instrument-specific selection
+                name: name.to_string(),
+                category: f.category.clone(),
+                description: f.description.clone(),
+                source: f.source.clone(),
+                sort_order: i as i32,
+            },
+        )
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    }
+
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/exercises"))
         .finish())
@@ -1561,7 +1567,7 @@ struct ScheduleTemplate {
 #[derive(Deserialize)]
 struct GenerateScheduleForm {
     start_date: String,
-    num_days: i32,
+    num_blocks: i32,
 }
 
 async fn schedule_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
@@ -1579,7 +1585,7 @@ async fn schedule_generate(
     form: QsForm<GenerateScheduleForm>,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
-    queries::generate_schedule(&pool, &f.start_date, f.num_days)
+    queries::generate_schedule(&pool, &f.start_date, f.num_blocks)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()

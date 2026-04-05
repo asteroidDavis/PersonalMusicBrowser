@@ -1,13 +1,15 @@
 {% extends "base.html" %}
-{% block title %}New Exercise{% endblock %}
+{% block title %}New Exercises{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>🏋️ New Practice Exercise</h2>
+    <h2>🏋️ New Practice Exercises</h2>
 </div>
+
 <form method="post" action="/exercises/new" class="form-card">
     <div class="form-group">
-        <label for="name">Name *</label>
-        <input type="text" id="name" name="name" required maxlength="256" placeholder="e.g. Chromatic warmup">
+        <label for="exercise_list">Exercise Names (one per line) *</label>
+        <textarea id="exercise_list" name="exercise_list" rows="8" placeholder="Chromatic warmup&#10;Major scales&#10;Minor pentatonic patterns&#10;..." required></textarea>
+        <span class="text-muted" style="font-size:0.85em">Enter each exercise name on a separate line</span>
     </div>
     <div class="form-group">
         <label for="category">Category *</label>
@@ -23,28 +25,15 @@
         </select>
     </div>
     <div class="form-group">
-        <label for="instrument_id">Instrument</label>
-        <select id="instrument_id" name="instrument_id">
-            <option value="">— Any —</option>
-            {% for i in instruments %}
-            <option value="{{ i.id }}">{{ i.name }}</option>
-            {% endfor %}
-        </select>
+        <label for="description">Description (applies to all exercises)</label>
+        <textarea id="description" name="description" rows="2" placeholder="Common description for all exercises..."></textarea>
     </div>
     <div class="form-group">
-        <label for="description">Description</label>
-        <textarea id="description" name="description" rows="3" placeholder="Details about the exercise..."></textarea>
-    </div>
-    <div class="form-group">
-        <label for="source">Source</label>
+        <label for="source">Source (applies to all exercises)</label>
         <input type="text" id="source" name="source" placeholder="e.g. Bass Method Book p.42">
     </div>
-    <div class="form-group">
-        <label for="sort_order">Sort Order</label>
-        <input type="number" id="sort_order" name="sort_order" value="0">
-    </div>
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Create Exercise</button>
+        <button type="submit" class="btn btn-primary">Create Exercises</button>
         <a href="/exercises" class="btn">Cancel</a>
     </div>
 </form>

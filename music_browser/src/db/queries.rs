@@ -1347,6 +1347,25 @@ pub async fn list_songs_by_workflow_state(
     Ok(songs)
 }
 
+pub async fn list_songs_in_live_sets(pool: &SqlitePool) -> Result<Vec<Song>, sqlx::Error> {
+    let sql = format!(
+        "SELECT {SONG_SELECT_COLS} FROM songs s \
+         LEFT JOIN albums a ON a.id = s.album_id \
+         INNER JOIN live_set_songs lss ON lss.song_id = s.id \
+         ORDER BY s.title"
+    );
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
+
+    let mut songs = Vec::new();
+    for row in &rows {
+        let sid: i64 = row.get("id");
+        let artists = fetch_song_artists(pool, sid).await?;
+        let f = row_to_song_fields(row);
+        songs.push(song_from_row(row, f, artists));
+    }
+    Ok(songs)
+}
+
 // ============================================================================
 // Practice exercises
 // ============================================================================
@@ -1585,7 +1604,7 @@ pub async fn delete_goal(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> 
 pub async fn list_schedule_events(pool: &SqlitePool) -> Result<Vec<ScheduleEvent>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, event_date, title, event_type, status, notes, created_at \
-         FROM schedule_events ORDER BY event_date DESC, id DESC",
+         FROM schedule_events ORDER BY event_date ASC, id ASC",
     )
     .fetch_all(pool)
     .await?;
@@ -1763,7 +1782,7 @@ pub async fn get_schedule_event(
 pub async fn generate_schedule(
     pool: &SqlitePool,
     start_date: &str,
-    num_days: i32,
+    num_blocks: i32,
 ) -> Result<Vec<i64>, sqlx::Error> {
     let profile = get_profile(pool).await?;
     let capacity = profile.songs_capacity as usize;
@@ -1782,21 +1801,35 @@ pub async fn generate_schedule(
         active_songs.append(&mut songs);
     }
 
-    // Get all exercises for warmups
+    // Also get songs from live sets for practice
+    let live_set_songs = list_songs_in_live_sets(pool).await?;
+    for song in live_set_songs {
+        if !active_songs.iter().any(|s| s.id == song.id) {
+            active_songs.push(song);
+        }
+    }
+
+    // Get all exercises for warmups (only add once per block)
     let exercises = list_exercises(pool).await?;
 
     let mut event_ids = Vec::new();
 
-    // Parse start date and generate events for each day
-    for day_offset in 0..num_days {
-        // Simple date arithmetic: parse YYYY-MM-DD and add days
-        let date = add_days_to_date(start_date, day_offset);
+    // Generate 3-day blocks instead of single days
+    for block_offset in 0..num_blocks {
+        let block_start_day = block_offset * 3;
+        let date_start = add_days_to_date(start_date, block_start_day);
+        let date_end = add_days_to_date(start_date, block_start_day + 2);
+        let date_range = if date_start == date_end {
+            date_start.clone()
+        } else {
+            format!("{} to {}", date_start, date_end)
+        };
 
         let event_id = create_schedule_event(
             pool,
             &CreateScheduleEvent {
-                event_date: date.clone(),
-                title: format!("Practice Session — {date}"),
+                event_date: date_start.clone(),
+                title: format!("Practice Block — {}", date_range),
                 event_type: "mixed".to_string(),
             },
         )
@@ -1804,7 +1837,7 @@ pub async fn generate_schedule(
 
         let mut sort = 0;
 
-        // 1. Warmup exercises (pick up to 2)
+        // 1. Warmup exercises (pick up to 2) - only once per 3-day block
         for ex in exercises.iter().take(2) {
             create_schedule_item(
                 pool,
@@ -1814,9 +1847,9 @@ pub async fn generate_schedule(
                     song_id: None,
                     exercise_id: Some(ex.id),
                     stage_id: None,
-                    instrument_id: ex.instrument_id,
+                    instrument_id: None, // Remove instrument-specific selection
                     title: format!("Warmup: {}", ex.name),
-                    duration_minutes: profile.warmup_minutes / 2,
+                    duration_minutes: profile.warmup_minutes * 3 / 2, // Spread across 3 days
                     sort_order: sort,
                     notes: String::new(),
                 },
@@ -1825,7 +1858,7 @@ pub async fn generate_schedule(
             sort += 1;
         }
 
-        // 2. Drills (pick up to 2 technique exercises)
+        // 2. Drills (pick up to 2 technique exercises) - only once per 3-day block
         let drills: Vec<&PracticeExercise> = exercises
             .iter()
             .filter(|e| e.category == "technique" || e.category == "scales")
@@ -1840,9 +1873,9 @@ pub async fn generate_schedule(
                     song_id: None,
                     exercise_id: Some(ex.id),
                     stage_id: None,
-                    instrument_id: ex.instrument_id,
+                    instrument_id: None, // Remove instrument-specific selection
                     title: format!("Drill: {}", ex.name),
-                    duration_minutes: profile.drill_minutes / 2,
+                    duration_minutes: profile.drill_minutes * 3 / 2, // Spread across 3 days
                     sort_order: sort,
                     notes: String::new(),
                 },
@@ -1853,7 +1886,7 @@ pub async fn generate_schedule(
 
         // 3. Song practice/production — priority-weighted shuffle
         //    Priority 1 (highest) gets weight 5, priority 5 gets weight 1, 0 (unranked) gets 2
-        let songs_for_day: Vec<&Song> = {
+        let songs_for_block: Vec<&Song> = {
             let mut weighted: Vec<(&Song, u32)> = active_songs
                 .iter()
                 .map(|s| {
@@ -1868,14 +1901,14 @@ pub async fn generate_schedule(
                     (s, w)
                 })
                 .collect();
-            // Deterministic-ish shuffle: rotate by day_offset, then stable-sort
+            // Deterministic-ish shuffle: rotate by block_offset, then stable-sort
             // descending by weight so higher-priority songs appear first
             let len = weighted.len().max(1);
-            weighted.rotate_left((day_offset as usize) % len);
+            weighted.rotate_left((block_offset as usize) % len);
             weighted.sort_by(|a, b| b.1.cmp(&a.1));
             weighted.iter().map(|(s, _)| *s).take(capacity).collect()
         };
-        for song in &songs_for_day {
+        for song in &songs_for_block {
             let item_type = match song.workflow_state {
                 WorkflowState::Producing | WorkflowState::CoverRecording => "song_production",
                 _ => "song_practice",
@@ -1894,7 +1927,7 @@ pub async fn generate_schedule(
                         stage_id: None,
                         instrument_id: None,
                         title: format!("Song warmup: {} — {}", se.exercise_name, song.title),
-                        duration_minutes: 5,
+                        duration_minutes: 1,
                         sort_order: sort,
                         notes: String::new(),
                     },
@@ -1921,7 +1954,8 @@ pub async fn generate_schedule(
                         },
                         song.title
                     ),
-                    duration_minutes: profile.song_minutes / songs_for_day.len().max(1) as i32,
+                    duration_minutes: profile.song_minutes * 3
+                        / songs_for_block.len().max(1) as i32,
                     sort_order: sort,
                     notes: String::new(),
                 },
@@ -1930,7 +1964,7 @@ pub async fn generate_schedule(
             sort += 1;
         }
 
-        // 4. Review time
+        // 4. Review time - only once per 3-day block
         create_schedule_item(
             pool,
             &CreateScheduleItem {
@@ -1941,7 +1975,7 @@ pub async fn generate_schedule(
                 stage_id: None,
                 instrument_id: None,
                 title: "Review: notes & listen to recordings".to_string(),
-                duration_minutes: profile.review_minutes,
+                duration_minutes: profile.review_minutes * 3,
                 sort_order: sort,
                 notes: String::new(),
             },

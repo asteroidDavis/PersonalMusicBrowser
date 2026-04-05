@@ -1869,15 +1869,15 @@ async fn test_schedule_generation() {
         );
     }
 
-    // Verify date sequencing
+    // Verify date sequencing - now 3-day blocks
     let dates: Vec<&str> = events.iter().map(|e| e.event_date.as_str()).collect();
     // Events are sorted DESC, so reverse for checking order
     let mut sorted_dates = dates.clone();
     sorted_dates.sort();
     assert_eq!(
         sorted_dates,
-        vec!["2026-04-01", "2026-04-02", "2026-04-03"],
-        "Expected dates 04-01..03, got {sorted_dates:?}"
+        vec!["2026-04-01", "2026-04-04", "2026-04-07"],
+        "Expected dates 3 days apart, got {sorted_dates:?}"
     );
 }
 
@@ -1944,7 +1944,7 @@ async fn test_add_days_to_date_basic() {
     let (pool, _tmp) = setup_pool().await;
     use music_browser::db::queries;
 
-    // Generate 1 day starting at month boundary
+    // Generate 2 blocks starting at month boundary (each block is 3 days)
     let events = queries::generate_schedule(&pool, "2026-01-31", 2)
         .await
         .unwrap();
@@ -1956,9 +1956,10 @@ async fn test_add_days_to_date_basic() {
         dates.contains(&"2026-01-31".to_string()),
         "Expected 2026-01-31 in dates, got {dates:?}"
     );
+    // Second block starts 3 days after first: Jan 31 + 3 days = Feb 03
     assert!(
-        dates.contains(&"2026-02-01".to_string()),
-        "Expected 2026-02-01 in dates, got {dates:?}"
+        dates.contains(&"2026-02-03".to_string()),
+        "Expected 2026-02-03 in dates, got {dates:?}"
     );
 }
 
