@@ -35,14 +35,20 @@
         <label for="key">Key</label>
         <input type="text" id="key" name="key" value="{{ key }}" placeholder="e.g. C major, Am">
     </div>
-    <div class="form-group" style="display:flex;gap:1rem">
-        <div>
-            <label for="bpm_lower">BPM Lower</label>
-            <input type="number" id="bpm_lower" name="bpm_lower" value="{% match bpm_lower %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+    <div class="form-group" style="display:flex;gap:1rem;align-items:end">
+        <div style="display:flex;gap:1rem;flex:1">
+            <div>
+                <label for="bpm_lower">BPM Lower</label>
+                <input type="number" id="bpm_lower" name="bpm_lower" value="{% match bpm_lower %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+            </div>
+            <div>
+                <label for="bpm_upper">BPM Upper</label>
+                <input type="number" id="bpm_upper" name="bpm_upper" value="{% match bpm_upper %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+            </div>
         </div>
         <div>
-            <label for="bpm_upper">BPM Upper</label>
-            <input type="number" id="bpm_upper" name="bpm_upper" value="{% match bpm_upper %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
+            <button type="button" id="tap-tempo-btn" class="btn btn-sm">🥁 Tap Tempo</button>
+            <div id="tap-display" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem;text-align:center;"></div>
         </div>
     </div>
     <div class="form-group">
@@ -75,4 +81,64 @@
         <a href="/" class="btn">Cancel</a>
     </div>
 </form>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tapBtn = document.getElementById('tap-tempo-btn');
+    const tapDisplay = document.getElementById('tap-display');
+    const bpmLowerInput = document.getElementById('bpm_lower');
+    const bpmUpperInput = document.getElementById('bpm_upper');
+    
+    let tapTimes = [];
+    let tapTimeout;
+    
+    tapBtn.addEventListener('click', function() {
+        const now = Date.now();
+        tapTimes.push(now);
+        
+        // Clear any existing timeout
+        if (tapTimeout) {
+            clearTimeout(tapTimeout);
+        }
+        
+        // Set timeout to reset after 3 seconds of inactivity
+        tapTimeout = setTimeout(function() {
+            tapTimes = [];
+            tapDisplay.textContent = '';
+            tapBtn.textContent = '🥁 Tap Tempo';
+        }, 3000);
+        
+        // Calculate BPM if we have at least 2 taps
+        if (tapTimes.length >= 2) {
+            // Calculate intervals between consecutive taps
+            const intervals = [];
+            for (let i = 1; i < tapTimes.length; i++) {
+                intervals.push(tapTimes[i] - tapTimes[i - 1]);
+            }
+            
+            // Calculate average interval (ignoring outliers)
+            intervals.sort((a, b) => a - b);
+            const middleIntervals = intervals.slice(1, -1); // Remove first and last as potential outliers
+            const avgInterval = middleIntervals.reduce((sum, interval) => sum + interval, 0) / middleIntervals.length;
+            
+            // Convert to BPM
+            const bpm = Math.round(60000 / avgInterval);
+            
+            // Update display
+            tapDisplay.textContent = `${bpm} BPM`;
+            tapBtn.textContent = '🥁 Tap...';
+            
+            // Update BPM fields
+            if (bpmLowerInput.value === '' || parseInt(bpmLowerInput.value) > bpm) {
+                bpmLowerInput.value = bpm;
+            }
+            if (bpmUpperInput.value === '' || parseInt(bpmUpperInput.value) < bpm) {
+                bpmUpperInput.value = bpm;
+            }
+        } else {
+            tapDisplay.textContent = 'Keep tapping...';
+            tapBtn.textContent = '🥁 Tap...';
+        }
+    });
+});
+</script>
 {% endblock %}

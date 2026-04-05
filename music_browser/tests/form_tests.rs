@@ -114,6 +114,13 @@ mod app {
             original_artist: form.original_artist.clone(),
             score_url: form.score_url.clone(),
             description: form.description.clone(),
+            workflow_state: WorkflowState::Discovered,
+            scores_folder: String::new(),
+            export_folder: String::new(),
+            musicxml_path: String::new(),
+            practice_project_path: String::new(),
+            time_signature: "4/4".to_string(),
+            practice_priority: 0,
             artist_ids: form.artist_ids.clone(),
         };
         queries::create_song(&pool, &input)

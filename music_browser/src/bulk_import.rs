@@ -287,6 +287,13 @@ async fn import_markdown_rows(
                 original_artist: String::new(),
                 score_url: row.score_url.clone(),
                 description: row.description.clone(),
+                workflow_state: WorkflowState::Discovered,
+                scores_folder: String::new(),
+                export_folder: String::new(),
+                musicxml_path: String::new(),
+                practice_project_path: String::new(),
+                time_signature: "4/4".to_string(),
+                practice_priority: 0,
                 artist_ids: vec![],
             };
             let id = queries::create_song(pool, &input).await?;
