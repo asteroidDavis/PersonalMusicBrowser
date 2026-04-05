@@ -532,10 +532,17 @@ async fn song_update(
     form: QsForm<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
+    let song_id = path.into_inner();
+    let existing = queries::get_song(&pool, song_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("Song not found"))?;
+    let st = SongType::parse(&form.song_type).unwrap_or(existing.song_type);
     let input = UpdateSong {
-        id: path.into_inner(),
+        id: song_id,
         title: form.title.clone(),
         album_id: form.album_id,
+        song_type: st,
         sheet_music: form.sheet_music.clone(),
         lyrics: form.lyrics.clone(),
         key: form.key.clone(),
@@ -544,12 +551,12 @@ async fn song_update(
         original_artist: form.original_artist.clone(),
         score_url: form.score_url.clone(),
         description: form.description.clone(),
-        scores_folder: String::new(),
-        export_folder: String::new(),
-        musicxml_path: String::new(),
-        practice_project_path: String::new(),
-        time_signature: "4/4".to_string(),
-        practice_priority: 0,
+        scores_folder: existing.scores_folder,
+        export_folder: existing.export_folder,
+        musicxml_path: existing.musicxml_path,
+        practice_project_path: existing.practice_project_path,
+        time_signature: existing.time_signature,
+        practice_priority: existing.practice_priority,
         artist_ids: form.artist_ids.clone(),
     };
     queries::update_song(&pool, &input)
