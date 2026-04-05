@@ -374,6 +374,7 @@ pub struct UpdateSong {
     pub id: i64,
     pub title: String,
     pub album_id: Option<i64>,
+    pub song_type: SongType,
     pub sheet_music: String,
     pub lyrics: String,
     pub key: String,

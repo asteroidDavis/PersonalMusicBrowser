@@ -419,7 +419,7 @@ pub async fn create_song(pool: &SqlitePool, input: &CreateSong) -> Result<i64, s
 
 pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE songs SET title = ?, album_id = ?, sheet_music = ?, lyrics = ?, \
+        "UPDATE songs SET title = ?, album_id = ?, song_type = ?, sheet_music = ?, lyrics = ?, \
          key = ?, bpm_lower = ?, bpm_upper = ?, original_artist = ?, \
          score_url = ?, description = ?, \
          scores_folder = ?, export_folder = ?, musicxml_path = ?, \
@@ -428,6 +428,7 @@ pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sq
     )
     .bind(&input.title)
     .bind(input.album_id)
+    .bind(input.song_type.as_str())
     .bind(&input.sheet_music)
     .bind(&input.lyrics)
     .bind(&input.key)
