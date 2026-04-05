@@ -4,6 +4,8 @@ target/
 *.sqlite3
 .env
 
+prompts/
+
 *settings.py
 
 *__pycache__*
