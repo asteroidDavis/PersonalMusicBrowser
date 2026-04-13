@@ -116,7 +116,7 @@
                 </td>
                 <td class="actions">
                     <form method="post" action="/production/stages/{{ stage.id }}/delete">
-                        <button class="btn btn-danger btn-sm" onclick="return confirm('Delete stage?')">✕</button>
+                        <button class="btn btn-danger btn-sm">✕</button>
                     </form>
                 </td>
             </tr>
@@ -136,7 +136,7 @@
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<span class="text-muted"> — {{ f.description }}</span>{% endif %}
                 <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form">
-                    <button class="btn btn-danger btn-sm" onclick="return confirm('Delete file?')" style="font-size:.65rem;padding:.1rem .3rem">✕</button>
+                    <button class="btn btn-danger btn-sm" style="font-size:.65rem;padding:.1rem .3rem">✕</button>
                 </form>
             </li>
         {% endfor %}
@@ -159,5 +159,58 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
         });
     });
 });
+
+function postForm(form) {
+    const data = new FormData(form);
+    return fetch(form.action, { method: 'POST', body: new URLSearchParams(data) });
+}
+
+function reloadAtScroll() {
+    sessionStorage.setItem('prodScrollY', window.scrollY);
+    location.reload();
+}
+
+document.querySelectorAll('.inline-form select').forEach(sel => {
+    sel.removeAttribute('onchange');
+    sel.addEventListener('change', () => postForm(sel.form));
+});
+
+document.querySelectorAll('form[action*="/stages/auto"], form[action*="/steps/auto"]').forEach(form => {
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        postForm(form).then(reloadAtScroll);
+    });
+    const btn = form.querySelector('button[type="submit"], button:not([type])');
+    if (btn) {
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            postForm(form).then(reloadAtScroll);
+        });
+    }
+});
+
+document.querySelectorAll('form[action*="/stages/"][action$="/delete"]').forEach(form => {
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        if (!confirm('Delete stage?')) return;
+        postForm(form).then(reloadAtScroll);
+    });
+});
+
+document.querySelectorAll('form[action*="/files/"][action$="/delete"]').forEach(form => {
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        if (!confirm('Delete file?')) return;
+        postForm(form).then(reloadAtScroll);
+    });
+});
+
+const savedY = sessionStorage.getItem('prodScrollY');
+if (savedY !== null) {
+    sessionStorage.removeItem('prodScrollY');
+    window.scrollTo(0, parseInt(savedY, 10));
+}
 </script>
 {% endblock %}
