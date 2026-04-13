@@ -976,7 +976,6 @@ async fn stage_create(
 }
 
 async fn stage_update_status(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
@@ -985,18 +984,17 @@ async fn stage_update_status(
     queries::update_production_stage_status(&pool, path.into_inner(), &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 async fn stage_delete(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_production_stage(&pool, path.into_inner())
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 async fn step_new(
@@ -1050,7 +1048,6 @@ async fn step_create(
 }
 
 async fn step_update_status(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
@@ -1059,7 +1056,7 @@ async fn step_update_status(
     queries::update_production_step_status(&pool, path.into_inner(), &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 async fn song_file_new(
@@ -1114,14 +1111,13 @@ async fn song_file_create(
 }
 
 async fn song_file_delete(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_song_file(&pool, path.into_inner())
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 // ---------------------------------------------------------------------------
@@ -1129,18 +1125,16 @@ async fn song_file_delete(
 // ---------------------------------------------------------------------------
 
 async fn auto_add_stages(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
     queries::auto_add_stages(&pool, path.into_inner())
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 async fn auto_add_steps(
-    req: HttpRequest,
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
 ) -> actix_web::Result<HttpResponse> {
@@ -1160,7 +1154,7 @@ async fn auto_add_steps(
     queries::auto_add_steps(&pool, stage_id, is_cover)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::NoContent().finish())
 }
 
 // ---------------------------------------------------------------------------
@@ -1812,9 +1806,7 @@ async fn practice_priority_update(
     queries::update_practice_priority(&pool, path.into_inner(), priority)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(HttpResponse::SeeOther()
-        .insert_header(("Location", "/practice"))
-        .finish())
+    Ok(HttpResponse::NoContent().finish())
 }
 
 // ---------------------------------------------------------------------------

@@ -145,5 +145,26 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
         });
     });
 });
+
+document.querySelectorAll('form[action*="/practice/songs/"][action$="/priority"]').forEach(form => {
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        const clicked = e.submitter;
+        if (!clicked) return;
+        const priority = clicked.value;
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams({ priority }),
+        }).then(r => {
+            if (r.ok) {
+                form.querySelectorAll('button[name="priority"]').forEach(btn => {
+                    const active = btn.value === priority;
+                    btn.style.background = active ? 'var(--accent)' : 'var(--surface)';
+                    btn.style.color = active ? '#fff' : '';
+                });
+            }
+        });
+    });
+});
 </script>
 {% endblock %}

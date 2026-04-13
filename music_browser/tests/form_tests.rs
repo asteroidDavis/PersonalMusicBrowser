@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 use std::str::FromStr;
 use tempfile::NamedTempFile;
 
+use music_browser::db::models::*;
 use music_browser::db::queries;
 
 // ---------------------------------------------------------------------------
@@ -477,4 +478,285 @@ async fn test_create_song_with_all_fields_filled() {
         "Song should have 2 artists, got {:?}",
         song.artists
     );
+}
+
+// ===========================================================================
+// Issue #19: Inline actions on Production and Practice pages must return
+// 204 No Content (not a redirect) so the browser JS can handle them without
+// scrolling the page back to the top.
+//
+// Gherkin:
+//   Given a song with a production stage and step exists
+//   When I POST to update the stage status / step status / practice priority
+//   Then the response is 204 No Content (no redirect)
+//   And when I POST to delete a stage or auto-add stages/steps
+//   Then the response is 204 No Content (JS reloads at saved scroll position)
+// ===========================================================================
+
+mod inline_actions {
+    use super::*;
+    use actix_web::{web, HttpResponse};
+    use serde::Deserialize;
+    use sqlx::SqlitePool;
+
+    #[derive(Deserialize)]
+    struct StatusForm {
+        status: String,
+    }
+
+    #[derive(Deserialize)]
+    struct PriorityForm {
+        priority: i32,
+    }
+
+    async fn stage_update_status(
+        pool: web::Data<SqlitePool>,
+        path: web::Path<i64>,
+        form: QsForm<StatusForm>,
+    ) -> actix_web::Result<HttpResponse> {
+        let status =
+            ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
+        queries::update_production_stage_status(&pool, path.into_inner(), &status)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        Ok(HttpResponse::NoContent().finish())
+    }
+
+    async fn step_update_status(
+        pool: web::Data<SqlitePool>,
+        path: web::Path<i64>,
+        form: QsForm<StatusForm>,
+    ) -> actix_web::Result<HttpResponse> {
+        let status =
+            ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
+        queries::update_production_step_status(&pool, path.into_inner(), &status)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        Ok(HttpResponse::NoContent().finish())
+    }
+
+    async fn stage_delete(
+        pool: web::Data<SqlitePool>,
+        path: web::Path<i64>,
+    ) -> actix_web::Result<HttpResponse> {
+        queries::delete_production_stage(&pool, path.into_inner())
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        Ok(HttpResponse::NoContent().finish())
+    }
+
+    async fn auto_add_stages(
+        pool: web::Data<SqlitePool>,
+        path: web::Path<i64>,
+    ) -> actix_web::Result<HttpResponse> {
+        queries::auto_add_stages(&pool, path.into_inner())
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        Ok(HttpResponse::NoContent().finish())
+    }
+
+    async fn practice_priority_update(
+        pool: web::Data<SqlitePool>,
+        path: web::Path<i64>,
+        form: QsForm<PriorityForm>,
+    ) -> actix_web::Result<HttpResponse> {
+        let priority = form.0.priority.clamp(0, 5);
+        queries::update_practice_priority(&pool, path.into_inner(), priority)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        Ok(HttpResponse::NoContent().finish())
+    }
+
+    pub fn configure(cfg: &mut web::ServiceConfig) {
+        cfg.route(
+            "/production/stages/{id}/status",
+            web::post().to(stage_update_status),
+        )
+        .route(
+            "/production/steps/{id}/status",
+            web::post().to(step_update_status),
+        )
+        .route(
+            "/production/stages/{id}/delete",
+            web::post().to(stage_delete),
+        )
+        .route(
+            "/production/songs/{id}/stages/auto",
+            web::post().to(auto_add_stages),
+        )
+        .route(
+            "/practice/songs/{id}/priority",
+            web::post().to(practice_priority_update),
+        );
+    }
+
+    async fn make_song_with_stage(pool: &SqlitePool) -> (i64, i64) {
+        let song_id =
+            sqlx::query("INSERT INTO songs (title, song_type) VALUES ('Test Song', 'song')")
+                .execute(pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+        let stage_id = sqlx::query(
+            "INSERT INTO production_stages (song_id, stage, status) VALUES (?, 'Mixing', 'not_started')",
+        )
+        .bind(song_id)
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        (song_id, stage_id)
+    }
+
+    #[actix_web::test]
+    async fn test_stage_status_update_returns_204_not_redirect() {
+        let (pool, _tmp) = setup_pool().await;
+        let (_song_id, stage_id) = make_song_with_stage(&pool).await;
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool))
+                .configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/production/stages/{stage_id}/status"))
+            .insert_header(("Content-Type", "application/x-www-form-urlencoded"))
+            .set_payload("status=in_progress")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status().as_u16(),
+            204,
+            "Stage status update must return 204 (not a redirect) to avoid scroll-to-top; got {}",
+            resp.status()
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_step_status_update_returns_204_not_redirect() {
+        let (pool, _tmp) = setup_pool().await;
+        let (_song_id, stage_id) = make_song_with_stage(&pool).await;
+        let step_id =
+            sqlx::query("INSERT INTO production_steps (stage_id, name, status, sort_order) VALUES (?, 'Mix stems', 'not_started', 1)")
+                .bind(stage_id)
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool))
+                .configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/production/steps/{step_id}/status"))
+            .insert_header(("Content-Type", "application/x-www-form-urlencoded"))
+            .set_payload("status=complete")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status().as_u16(),
+            204,
+            "Step status update must return 204 (not a redirect) to avoid scroll-to-top; got {}",
+            resp.status()
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_stage_delete_returns_204_not_redirect() {
+        let (pool, _tmp) = setup_pool().await;
+        let (_song_id, stage_id) = make_song_with_stage(&pool).await;
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool))
+                .configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/production/stages/{stage_id}/delete"))
+            .insert_header(("Content-Type", "application/x-www-form-urlencoded"))
+            .set_payload("")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status().as_u16(),
+            204,
+            "Stage delete must return 204 (not a redirect) to avoid scroll-to-top; got {}",
+            resp.status()
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_auto_add_stages_returns_204_not_redirect() {
+        let (pool, _tmp) = setup_pool().await;
+        let song_id =
+            sqlx::query("INSERT INTO songs (title, song_type) VALUES ('Auto Song', 'song')")
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool))
+                .configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/production/songs/{song_id}/stages/auto"))
+            .insert_header(("Content-Type", "application/x-www-form-urlencoded"))
+            .set_payload("")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status().as_u16(),
+            204,
+            "Auto-add stages must return 204 (not a redirect) to avoid scroll-to-top; got {}",
+            resp.status()
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_practice_priority_update_returns_204_not_redirect() {
+        let (pool, _tmp) = setup_pool().await;
+        let song_id =
+            sqlx::query("INSERT INTO songs (title, song_type) VALUES ('Priority Song', 'song')")
+                .execute(&pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool))
+                .configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/practice/songs/{song_id}/priority"))
+            .insert_header(("Content-Type", "application/x-www-form-urlencoded"))
+            .set_payload("priority=2")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status().as_u16(),
+            204,
+            "Practice priority update must return 204 (not a redirect) to avoid scroll-to-top; got {}",
+            resp.status()
+        );
+    }
 }
