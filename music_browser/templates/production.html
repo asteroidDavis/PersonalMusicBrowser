@@ -178,8 +178,17 @@ document.querySelectorAll('.inline-form select').forEach(sel => {
 document.querySelectorAll('form[action*="/stages/auto"], form[action*="/steps/auto"]').forEach(form => {
     form.addEventListener('submit', e => {
         e.preventDefault();
+        e.stopPropagation();
         postForm(form).then(reloadAtScroll);
     });
+    const btn = form.querySelector('button[type="submit"], button:not([type])');
+    if (btn) {
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            postForm(form).then(reloadAtScroll);
+        });
+    }
 });
 
 document.querySelectorAll('form[action*="/stages/"][action$="/delete"]').forEach(form => {
