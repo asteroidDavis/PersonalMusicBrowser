@@ -32,7 +32,7 @@
 {% else %}
 
 {% for entry in songs %}
-<details class="prod-card" data-song-type="{{ entry.song_type }}">
+<details class="prod-card" data-song-type="{{ entry.song_type }}" open>
     <summary class="prod-card-header" style="cursor:pointer;list-style:none;">
         <h3>
             <span style="font-size:.8em;opacity:.5;">▶</span>
@@ -45,15 +45,15 @@
             {% if !entry.bpm.is_empty() %}<span class="meta-tag">🥁 {{ entry.bpm }}</span>{% endif %}
             {% if !entry.album_title.is_empty() %}<span class="meta-tag">💿 {{ entry.album_title }}</span>{% endif %}
         </div>
-        <div class="prod-card-actions">
-            <a href="/production/songs/{{ entry.song_id }}/stages/new" class="btn btn-sm">+ Stage</a>
-            <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
-                <button type="submit" class="btn btn-sm" title="Add all 7 standard stages">⚡ Auto Stages</button>
-            </form>
-            <a href="/production/songs/{{ entry.song_id }}/files/new?return_to=/production" class="btn btn-sm">+ File</a>
-            <a href="/songs/{{ entry.song_id }}/edit?return_to=/production" class="btn btn-sm">Edit Song</a>
-        </div>
     </summary>
+    <div class="prod-card-actions">
+        <a href="/production/songs/{{ entry.song_id }}/stages/new" class="btn btn-sm">+ Stage</a>
+        <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
+            <button type="submit" class="btn btn-sm" title="Add all 7 standard stages">⚡ Auto Stages</button>
+        </form>
+        <a href="/production/songs/{{ entry.song_id }}/files/new?return_to=/production" class="btn btn-sm">+ File</a>
+        <a href="/songs/{{ entry.song_id }}/edit?return_to=/production" class="btn btn-sm">Edit Song</a>
+    </div>
 
     {% if entry.stages.is_empty() %}
         <p class="count" style="padding:.5rem 0">No production stages defined.
@@ -178,17 +178,8 @@ document.querySelectorAll('.inline-form select').forEach(sel => {
 document.querySelectorAll('form[action*="/stages/auto"], form[action*="/steps/auto"]').forEach(form => {
     form.addEventListener('submit', e => {
         e.preventDefault();
-        e.stopPropagation();
         postForm(form).then(reloadAtScroll);
     });
-    const btn = form.querySelector('button[type="submit"], button:not([type])');
-    if (btn) {
-        btn.addEventListener('click', e => {
-            e.preventDefault();
-            e.stopPropagation();
-            postForm(form).then(reloadAtScroll);
-        });
-    }
 });
 
 document.querySelectorAll('form[action*="/stages/"][action$="/delete"]').forEach(form => {
