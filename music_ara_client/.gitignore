@@ -1,0 +1,9 @@
+build/
+build-*/
+_deps/
+*.vst3
+Testing/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
