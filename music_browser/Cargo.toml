@@ -18,6 +18,8 @@ dotenvy = "0.15"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 serde_qs = "0.13"
+thiserror = "1"
+tempfile = "3"
 
 [[bin]]
 name = "music-browser"
