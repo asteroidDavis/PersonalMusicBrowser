@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 // ============================================================================
@@ -62,7 +64,8 @@ pub struct WorkflowJob {
 #[derive(Clone)]
 pub struct JobQueue {
     sender: mpsc::Sender<WorkflowJob>,
-    next_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    next_id: Arc<std::sync::atomic::AtomicU64>,
+    pub store: JobStore,
 }
 
 impl JobQueue {
@@ -72,16 +75,19 @@ impl JobQueue {
         let (sender, receiver) = mpsc::channel(buffer);
         let queue = JobQueue {
             sender,
-            next_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            next_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            store: JobStore::new(),
         };
         (queue, receiver)
     }
 
-    /// Assign an ID and submit a job.  Returns the assigned job ID.
+    /// Assign an ID, register in the store, and submit to the worker.
+    /// Returns the assigned job ID.
     pub async fn enqueue(&self, mut job: WorkflowJob) -> Result<u64, EnqueueError> {
         job.id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.store.register(job.clone());
         self.sender
             .send(job.clone())
             .await
@@ -98,6 +104,129 @@ pub enum EnqueueError {
 }
 
 // ============================================================================
+// In-memory job store
+// ============================================================================
+
+/// Lifecycle state of a job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Queued,
+    Running,
+    Done,
+    Failed,
+}
+
+impl JobStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JobStatus::Queued => "queued",
+            JobStatus::Running => "running",
+            JobStatus::Done => "done",
+            JobStatus::Failed => "failed",
+        }
+    }
+}
+
+/// A snapshot of a job together with its captured log lines.
+#[derive(Debug, Clone, Serialize)]
+pub struct JobRecord {
+    pub job: WorkflowJob,
+    pub status: JobStatus,
+    pub log_lines: Vec<String>,
+    /// Wall-clock instant the job was registered (used for TTL eviction).
+    #[serde(skip)]
+    pub created_at: std::time::Instant,
+}
+
+/// Maximum number of jobs retained in memory.
+const JOB_STORE_CAP: usize = 10;
+/// Time-to-live for a job record.
+const JOB_STORE_TTL: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+
+/// Shared in-memory ring-buffer of recent jobs.
+///
+/// Old entries are evicted when `JOB_STORE_CAP` is exceeded or when an entry
+/// is older than `JOB_STORE_TTL`.  Both `JobQueue` and `run_worker` hold a
+/// clone of the `Arc` so they can write into it.
+#[derive(Clone)]
+pub struct JobStore(Arc<Mutex<VecDeque<JobRecord>>>);
+
+impl JobStore {
+    pub fn new() -> Self {
+        JobStore(Arc::new(Mutex::new(VecDeque::with_capacity(
+            JOB_STORE_CAP + 1,
+        ))))
+    }
+
+    /// Register a freshly-enqueued job.
+    pub fn register(&self, job: WorkflowJob) {
+        let mut guard = self.0.lock().unwrap();
+        self.evict(&mut guard);
+        guard.push_back(JobRecord {
+            job,
+            status: JobStatus::Queued,
+            log_lines: Vec::new(),
+            created_at: std::time::Instant::now(),
+        });
+        if guard.len() > JOB_STORE_CAP {
+            guard.pop_front();
+        }
+    }
+
+    /// Transition a job to `Running`.
+    pub fn mark_running(&self, id: u64) {
+        self.update(id, |r| r.status = JobStatus::Running);
+    }
+
+    /// Append a log line to a job's record.
+    pub fn append_log(&self, id: u64, line: String) {
+        self.update(id, |r| r.log_lines.push(line));
+    }
+
+    /// Transition a job to `Done`.
+    pub fn mark_done(&self, id: u64) {
+        self.update(id, |r| r.status = JobStatus::Done);
+    }
+
+    /// Transition a job to `Failed`.
+    pub fn mark_failed(&self, id: u64) {
+        self.update(id, |r| r.status = JobStatus::Failed);
+    }
+
+    /// Return a snapshot of all live records, newest first.
+    pub fn list(&self) -> Vec<JobRecord> {
+        let mut guard = self.0.lock().unwrap();
+        self.evict(&mut guard);
+        guard.iter().cloned().rev().collect()
+    }
+
+    /// Return a single record by job ID.
+    pub fn get(&self, id: u64) -> Option<JobRecord> {
+        let guard = self.0.lock().unwrap();
+        guard.iter().find(|r| r.job.id == id).cloned()
+    }
+
+    fn update<F: FnOnce(&mut JobRecord)>(&self, id: u64, f: F) {
+        let mut guard = self.0.lock().unwrap();
+        if let Some(r) = guard.iter_mut().find(|r| r.job.id == id) {
+            f(r);
+        }
+    }
+
+    fn evict(&self, guard: &mut VecDeque<JobRecord>) {
+        let now = std::time::Instant::now();
+        guard.retain(|r| now.duration_since(r.created_at) < JOB_STORE_TTL);
+    }
+}
+
+impl Default for JobStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
 // Background worker
 // ============================================================================
 
@@ -105,13 +234,26 @@ pub enum EnqueueError {
 /// locally-present file (hydrating or copying OneDrive placeholders as
 /// needed), then log the ready-to-dispatch job.
 ///
+/// All progress is written into `store` so the `/jobs` UI can display it.
 /// Replace the inner log with a real subprocess call in Phase 3.
-pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>) {
+pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>, store: JobStore) {
+    macro_rules! job_log {
+        ($id:expr, $store:expr, $($arg:tt)*) => {{
+            let line = format!($($arg)*);
+            log::info!("{}", line);
+            $store.append_log($id, line);
+        }};
+    }
+
     log::info!("workflow job worker started");
     while let Some(job) = receiver.recv().await {
-        log::info!(
-            "workflow job {}: op={} target_type={:?} target={} paths={:?}",
-            job.id,
+        let id = job.id;
+        store.mark_running(id);
+
+        job_log!(
+            id,
+            store,
+            "job {id}: started op={} target_type={:?} target={} paths={:?}",
             job.operation.as_str(),
             job.target_type,
             job.target_id_or_path,
@@ -125,11 +267,16 @@ pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>) {
             let path = PathBuf::from(raw);
             match ensure_local(&path).await {
                 Ok(local) => {
-                    log::info!("job {}: normalized {:?} → {:?}", job.id, path, local);
+                    job_log!(id, store, "job {id}: normalized {:?} → {:?}", path, local);
                     local_paths.push(local);
                 }
                 Err(e) => {
-                    log::error!("job {}: could not normalize path {:?}: {e}", job.id, path);
+                    job_log!(
+                        id,
+                        store,
+                        "job {id}: could not normalize path {:?}: {e}",
+                        path
+                    );
                     failed = true;
                     break;
                 }
@@ -137,17 +284,20 @@ pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>) {
         }
 
         if failed {
-            log::warn!("job {}: skipped due to path normalization failure", job.id);
+            job_log!(id, store, "job {id}: failed — path normalization error");
+            store.mark_failed(id);
             continue;
         }
 
-        log::info!(
-            "job {}: ready to dispatch op={} local_paths={:?}",
-            job.id,
+        job_log!(
+            id,
+            store,
+            "job {id}: ready to dispatch op={} local_paths={:?}",
             job.operation.as_str(),
             local_paths,
         );
         // TODO(phase-3): spawn music_operations Python subprocess with local_paths
+        store.mark_done(id);
     }
     log::info!("workflow job worker stopped");
 }

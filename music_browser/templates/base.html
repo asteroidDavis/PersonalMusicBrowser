@@ -25,6 +25,8 @@
         nav .nav-prod a:hover { background:rgba(245,158,11,.1); }
         nav .nav-prac a { color:var(--prac-accent); font-weight:600; }
         nav .nav-prac a:hover { background:rgba(16,185,129,.1); }
+        nav .nav-jobs a { color:#a78bfa; font-weight:600; }
+        nav .nav-jobs a:hover { background:rgba(167,139,250,.1); }
         .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
         .page-header h2 { font-size:1.5rem; }
         .count { color:var(--text-muted); margin-bottom:1rem; font-size:.9rem; }
@@ -131,6 +133,8 @@
             <li><a href="/goals">📋 Goals</a></li>
             <li><a href="/schedule">📅 Schedule</a></li>
             <li><a href="/profile">👤 Profile</a></li>
+            <li class="nav-sep">│</li>
+            <li class="nav-jobs"><a href="/jobs">🔧 Jobs</a></li>
         </ul>
     </nav>
     {% block content %}{% endblock %}

@@ -7,7 +7,9 @@ use sqlx::SqlitePool;
 
 use music_browser::db::models::*;
 use music_browser::db::queries;
-use music_browser::jobs::{check_hydration, JobQueue, Operation, TargetType, WorkflowJob};
+use music_browser::jobs::{
+    check_hydration, JobQueue, JobRecord, JobStatus, JobStore, Operation, TargetType, WorkflowJob,
+};
 
 /// Extract the `Referer` header from a request, falling back to `default`.
 fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
@@ -168,6 +170,55 @@ struct BandsTemplate {
 #[template(path = "band_form.html")]
 struct BandFormTemplate {
     name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Jobs view structs
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "jobs.html")]
+struct JobsTemplate {
+    jobs: Vec<JobRowView>,
+}
+
+struct JobRowView {
+    id: u64,
+    status: String,
+    status_label: String,
+    operation: String,
+    target_type: String,
+    target: String,
+    log_count: usize,
+    resolved_paths: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "job_detail.html")]
+struct JobDetailTemplate {
+    row: JobRowView,
+    log_lines: Vec<String>,
+    /// Pre-filled JSON for the re-run form.
+    prefill_json: String,
+}
+
+fn job_to_row(r: &JobRecord) -> JobRowView {
+    let (status, status_label) = match r.status {
+        JobStatus::Queued => ("queued", "⏳ Queued"),
+        JobStatus::Running => ("running", "⚙️ Running"),
+        JobStatus::Done => ("done", "✅ Done"),
+        JobStatus::Failed => ("failed", "❌ Failed"),
+    };
+    JobRowView {
+        id: r.job.id,
+        status: status.to_string(),
+        status_label: status_label.to_string(),
+        operation: r.job.operation.as_str().to_string(),
+        target_type: format!("{:?}", r.job.target_type).to_lowercase(),
+        target: r.job.target_id_or_path.clone(),
+        log_count: r.log_lines.len(),
+        resolved_paths: r.job.resolved_paths.clone(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1811,7 +1862,45 @@ async fn practice_priority_update(
 }
 
 // ---------------------------------------------------------------------------
-// Workflow jobs API
+// Handlers — Job monitor
+// ---------------------------------------------------------------------------
+
+async fn jobs_list(store: web::Data<JobStore>) -> actix_web::Result<HttpResponse> {
+    let jobs: Vec<JobRowView> = store.list().iter().map(job_to_row).collect();
+    let tmpl = JobsTemplate { jobs };
+    let body = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn job_detail(
+    store: web::Data<JobStore>,
+    path: web::Path<u64>,
+) -> actix_web::Result<HttpResponse> {
+    let id = path.into_inner();
+    let record = store
+        .get(id)
+        .ok_or_else(|| actix_web::error::ErrorNotFound("job not found"))?;
+    let prefill_json = serde_json::to_string_pretty(&serde_json::json!({
+        "target_type": format!("{:?}", record.job.target_type).to_lowercase(),
+        "target_id_or_path": record.job.target_id_or_path,
+        "operation": record.job.operation.as_str(),
+    }))
+    .unwrap_or_default();
+    let tmpl = JobDetailTemplate {
+        log_lines: record.log_lines.clone(),
+        prefill_json,
+        row: job_to_row(&record),
+    };
+    let body = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — Workflow jobs API
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -2059,7 +2148,10 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
             web::post().to(practice_priority_update),
         )
         // Workflow jobs API
-        .route("/api/workflows", web::post().to(workflows_enqueue));
+        .route("/api/workflows", web::post().to(workflows_enqueue))
+        // Job monitor UI
+        .route("/jobs", web::get().to(jobs_list))
+        .route("/jobs/{id}", web::get().to(job_detail));
 }
 
 // ---------------------------------------------------------------------------
@@ -2082,8 +2174,13 @@ async fn main() -> std::io::Result<()> {
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
 
     let (job_queue, job_receiver) = JobQueue::new(256);
-    tokio::spawn(music_browser::jobs::run_worker(job_receiver));
+    let job_store = job_queue.store.clone();
+    tokio::spawn(music_browser::jobs::run_worker(
+        job_receiver,
+        job_store.clone(),
+    ));
     let queue_data = web::Data::new(job_queue);
+    let store_data = web::Data::new(job_store);
 
     log::info!("Listening on http://{bind}");
 
@@ -2091,6 +2188,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(pool_data.clone())
             .app_data(queue_data.clone())
+            .app_data(store_data.clone())
             .configure(configure_app)
     })
     .bind(&bind)?

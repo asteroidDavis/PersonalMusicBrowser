@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs — Personal Music Browser{% endblock %}
+
+{% block content %}
+<style>
+    .jobs-header h2 { color:#a78bfa; }
+    .job-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem; margin-bottom:1rem; display:grid; grid-template-columns:auto 1fr auto; gap:.75rem 1.25rem; align-items:start; }
+    .job-card:hover { border-color:#a78bfa44; }
+    .job-id { font-size:1.5rem; font-weight:700; color:#a78bfa; line-height:1; padding-top:.15rem; }
+    .job-meta { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.4rem; align-items:center; }
+    .job-target { color:var(--text); font-size:.95rem; margin-bottom:.3rem; }
+    .job-target code { color:#a78bfa; font-size:.85rem; }
+    .job-paths { margin:.3rem 0 0; }
+    .job-paths summary { color:var(--text-muted); font-size:.8rem; cursor:pointer; }
+    .job-paths ol { margin:.3rem 0 0 1rem; }
+    .job-paths li { font-size:.78rem; color:var(--text-muted); font-family:monospace; }
+    .job-actions { display:flex; flex-direction:column; gap:.4rem; align-items:flex-end; }
+    .status-badge { display:inline-block; padding:.2rem .55rem; border-radius:3px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+    .status-queued  { background:rgba(251,191,36,.15); color:#fbbf24; border:1px solid #fbbf2440; }
+    .status-running { background:rgba(96,165,250,.15); color:#60a5fa; border:1px solid #60a5fa40; }
+    .status-done    { background:rgba(52,211,153,.15); color:#34d399; border:1px solid #34d39940; }
+    .status-failed  { background:rgba(248,113,113,.15); color:#f87171; border:1px solid #f8717140; }
+    .op-badge { background:rgba(167,139,250,.12); color:#a78bfa; padding:.15rem .45rem; border-radius:3px; font-size:.75rem; font-weight:600; }
+    .target-badge { background:rgba(255,255,255,.06); color:var(--text-muted); padding:.15rem .45rem; border-radius:3px; font-size:.75rem; }
+    .log-pill { background:rgba(255,255,255,.04); color:var(--text-muted); padding:.15rem .45rem; border-radius:3px; font-size:.75rem; }
+    .empty-jobs { text-align:center; padding:4rem 1rem; color:var(--text-muted); }
+    .empty-jobs p { margin-bottom:1rem; font-size:1.1rem; }
+    .enqueue-panel { background:var(--surface); border:1px solid #a78bfa33; border-radius:var(--radius); padding:1.5rem; margin-bottom:2rem; }
+    .enqueue-panel h3 { color:#a78bfa; margin-bottom:1rem; font-size:1rem; }
+    .enqueue-row { display:flex; gap:.75rem; flex-wrap:wrap; align-items:flex-end; }
+    .enqueue-row .form-group { margin:0; flex:1; min-width:140px; }
+    .enqueue-row .form-group label { font-size:.8rem; }
+    .enqueue-row select, .enqueue-row input { font-size:.9rem; }
+    #enqueue-result { margin-top:.75rem; font-size:.85rem; color:var(--text-muted); min-height:1.4em; }
+</style>
+
+<div class="page-header jobs-header">
+    <h2>🔧 Job Monitor</h2>
+    <span class="count">{{ jobs.len() }} job(s) in memory · max 10 · TTL 2 h</span>
+</div>
+
+<div class="enqueue-panel">
+    <h3>Submit new job</h3>
+    <div class="enqueue-row">
+        <div class="form-group">
+            <label>Target type</label>
+            <select id="eq-target-type">
+                <option value="song">song</option>
+                <option value="live_set">live_set</option>
+                <option value="file">file</option>
+                <option value="directory">directory</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex:2">
+            <label>Target ID or path</label>
+            <input type="text" id="eq-target" placeholder="song id or /abs/path/to/file">
+        </div>
+        <div class="form-group">
+            <label>Operation</label>
+            <select id="eq-operation">
+                <option value="generate_sheet_music">generate_sheet_music</option>
+                <option value="repomix">repomix</option>
+                <option value="hitpoints">hitpoints</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex:0">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" onclick="submitJob()">Enqueue</button>
+        </div>
+    </div>
+    <div id="enqueue-result"></div>
+</div>
+
+{% if jobs.is_empty() %}
+<div class="empty-jobs">
+    <p>No jobs yet.</p>
+    <p class="text-muted">Use the form above or POST to <code>/api/workflows</code> to enqueue one.</p>
+</div>
+{% else %}
+{% for j in jobs %}
+<div class="job-card">
+    <div class="job-id">#{{ j.id }}</div>
+    <div>
+        <div class="job-meta">
+            <span class="status-badge status-{{ j.status }}">{{ j.status_label }}</span>
+            <span class="op-badge">{{ j.operation }}</span>
+            <span class="target-badge">{{ j.target_type }}</span>
+            <span class="log-pill">{{ j.log_count }} log line(s)</span>
+        </div>
+        <div class="job-target">Target: <code>{{ j.target }}</code></div>
+        {% if !j.resolved_paths.is_empty() %}
+        <details class="job-paths">
+            <summary>{{ j.resolved_paths.len() }} resolved path(s)</summary>
+            <ol>{% for p in j.resolved_paths %}<li>{{ p }}</li>{% endfor %}</ol>
+        </details>
+        {% endif %}
+    </div>
+    <div class="job-actions">
+        <a href="/jobs/{{ j.id }}" class="btn btn-sm">View logs →</a>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+async function submitJob() {
+    const payload = {
+        target_type: document.getElementById('eq-target-type').value,
+        target_id_or_path: document.getElementById('eq-target').value.trim(),
+        operation: document.getElementById('eq-operation').value,
+    };
+    const el = document.getElementById('enqueue-result');
+    if (!payload.target_id_or_path) { el.textContent = '⚠ Target is required.'; return; }
+    try {
+        const r = await fetch('/api/workflows', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) {
+            el.innerHTML = `✅ Accepted — job <strong>#${data.job_id}</strong>. <a href="/jobs/${data.job_id}">View →</a>`;
+            setTimeout(() => location.reload(), 800);
+        } else {
+            el.textContent = `❌ ${r.status}: ${data.message ?? JSON.stringify(data)}`;
+        }
+    } catch (e) {
+        el.textContent = `❌ Network error: ${e}`;
+    }
+}
+</script>
+{% endblock %}
