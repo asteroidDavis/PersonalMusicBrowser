@@ -805,14 +805,15 @@ mod workflow_api_tests {
             let operation = Operation::parse(&body.operation).ok_or_else(|| {
                 actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
             })?;
-            let resolved_paths =
-                resolve_paths(&pool, &target_type, &body.target_id_or_path).await?;
+            let (resolved_paths, output_dir) =
+                resolve_paths(&pool, &target_type, &operation, &body.target_id_or_path).await?;
             let job = WorkflowJob {
                 id: 0,
                 target_type,
                 target_id_or_path: body.target_id_or_path.clone(),
                 operation,
                 resolved_paths,
+                output_dir,
             };
             let job_id = queue
                 .enqueue(job)
@@ -825,8 +826,9 @@ mod workflow_api_tests {
         async fn resolve_paths(
             pool: &SqlitePool,
             target_type: &TargetType,
+            operation: &Operation,
             target_id_or_path: &str,
-        ) -> actix_web::Result<Vec<String>> {
+        ) -> actix_web::Result<(Vec<String>, Option<String>)> {
             match target_type {
                 TargetType::Song => {
                     let id: i64 = target_id_or_path.parse().map_err(|_| {
@@ -836,17 +838,7 @@ mod workflow_api_tests {
                         .await
                         .map_err(actix_web::error::ErrorInternalServerError)?
                         .ok_or_else(|| actix_web::error::ErrorNotFound("song not found"))?;
-                    let mut paths = Vec::new();
-                    for p in [
-                        &song.scores_folder,
-                        &song.practice_project_path,
-                        &song.export_folder,
-                    ] {
-                        if !p.is_empty() {
-                            paths.push(p.clone());
-                        }
-                    }
-                    Ok(paths)
+                    resolve_song(&song, operation)
                 }
                 TargetType::LiveSet => {
                     let id: i64 = target_id_or_path.parse().map_err(|_| {
@@ -856,7 +848,7 @@ mod workflow_api_tests {
                         .await
                         .map_err(actix_web::error::ErrorInternalServerError)?
                         .ok_or_else(|| actix_web::error::ErrorNotFound("live_set not found"))?;
-                    Ok(vec![set.name.clone()])
+                    Ok((vec![set.name.clone()], None))
                 }
                 TargetType::File | TargetType::Directory => {
                     let path = std::path::Path::new(target_id_or_path);
@@ -872,9 +864,55 @@ mod workflow_api_tests {
                             )))
                         }
                         music_browser::jobs::HydrationStatus::Hydrated => {
-                            Ok(vec![target_id_or_path.to_string()])
+                            Ok((vec![target_id_or_path.to_string()], None))
                         }
                     }
+                }
+            }
+        }
+
+        fn resolve_song(
+            song: &music_browser::db::models::Song,
+            operation: &Operation,
+        ) -> actix_web::Result<(Vec<String>, Option<String>)> {
+            let non_empty = |s: &str| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            };
+            match operation {
+                Operation::GenerateSheetMusic => {
+                    let export = non_empty(&song.export_folder).ok_or_else(|| {
+                        actix_web::error::ErrorUnprocessableEntity(
+                            "song has no export_folder configured",
+                        )
+                    })?;
+                    // Test-only: accept the folder as the input path directly
+                    // (real handler scans for .wav files; integration tests
+                    // don't exercise disk contents).
+                    let output = non_empty(&song.scores_folder).unwrap_or_else(|| export.clone());
+                    Ok((vec![export], Some(output)))
+                }
+                Operation::Repomix => {
+                    let input = non_empty(&song.practice_project_path)
+                        .or_else(|| non_empty(&song.export_folder))
+                        .ok_or_else(|| {
+                            actix_web::error::ErrorUnprocessableEntity(
+                                "song has no practice_project_path or export_folder",
+                            )
+                        })?;
+                    let output = non_empty(&song.export_folder).unwrap_or_else(|| input.clone());
+                    Ok((vec![input], Some(output)))
+                }
+                Operation::Hitpoints => {
+                    let input = non_empty(&song.export_folder).ok_or_else(|| {
+                        actix_web::error::ErrorUnprocessableEntity(
+                            "song has no export_folder configured",
+                        )
+                    })?;
+                    Ok((vec![input.clone()], Some(input)))
                 }
             }
         }
@@ -899,7 +937,8 @@ mod workflow_api_tests {
         let (pool, _tmp) = setup_pool().await;
 
         let song_id = sqlx::query(
-            "INSERT INTO songs (title, song_type, scores_folder) VALUES ('Test', 'song', '/scores/test')",
+            "INSERT INTO songs (title, song_type, scores_folder, export_folder) \
+             VALUES ('Test', 'song', '/scores/test', '/exports/test')",
         )
         .execute(&pool)
         .await
@@ -1134,11 +1173,14 @@ mod workflow_api_tests {
     async fn test_post_workflow_sequential_jobs_have_ascending_ids() {
         let (pool, _tmp) = setup_pool().await;
 
-        let song_id = sqlx::query("INSERT INTO songs (title, song_type) VALUES ('Multi', 'song')")
-            .execute(&pool)
-            .await
-            .unwrap()
-            .last_insert_rowid();
+        let song_id = sqlx::query(
+            "INSERT INTO songs (title, song_type, practice_project_path, export_folder) \
+             VALUES ('Multi', 'song', '/projects/multi.cpr', '/exports/multi')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
 
         let (queue, _rx) = JobQueue::new(64);
         let app = test::init_service(

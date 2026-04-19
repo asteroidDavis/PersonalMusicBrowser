@@ -57,7 +57,18 @@ pub struct WorkflowJob {
     pub operation: Operation,
     /// Resolved absolute path(s) the worker should act on (populated by
     /// entity resolution before the job is sent to the channel).
+    ///
+    /// Each element is treated as a subprocess *input* — one
+    /// `music-operations` invocation is spawned per entry.
     pub resolved_paths: Vec<String>,
+    /// Absolute directory that receives any files the operation writes.
+    ///
+    /// When `None` the worker derives one (e.g. the parent directory of the
+    /// input).  Populated by entity resolution for `Song`/`LiveSet` targets
+    /// so song output lands in the song's configured `scores_folder` or
+    /// `export_folder`.
+    #[serde(default)]
+    pub output_dir: Option<String>,
 }
 
 /// Lightweight handle used to submit jobs from request handlers.
@@ -230,76 +241,220 @@ impl Default for JobStore {
 // Background worker
 // ============================================================================
 
-/// Consume jobs from `receiver`, normalize every resolved path to a
-/// locally-present file (hydrating or copying OneDrive placeholders as
-/// needed), then log the ready-to-dispatch job.
+/// Environment variable used to override the `music-operations` executable.
+///
+/// Defaults to `music-operations` (picked up from `$PATH`).  Useful when the
+/// CLI is installed in a venv that is not on `$PATH`, e.g.
+/// `MUSIC_OPERATIONS_BIN=/opt/music-ops/bin/music-operations`.
+pub const MUSIC_OPERATIONS_BIN_ENV: &str = "MUSIC_OPERATIONS_BIN";
+
+/// Resolve the `music-operations` executable name.
+fn music_operations_bin() -> String {
+    std::env::var(MUSIC_OPERATIONS_BIN_ENV).unwrap_or_else(|_| "music-operations".to_string())
+}
+
+/// Map a [`Operation`] to the sub-command expected by the `music-operations`
+/// CLI (`--operation <X>`).  Returns `None` for operations that the external
+/// CLI does not yet support so the caller can surface a clear error.
+fn operation_cli_name(op: &Operation) -> Option<&'static str> {
+    match op {
+        Operation::GenerateSheetMusic => Some("anthemscore"),
+        Operation::Repomix => Some("repomix"),
+        Operation::Hitpoints => None,
+    }
+}
+
+/// Consume jobs from `receiver`, hydrate every resolved path, then dispatch
+/// the corresponding `music-operations` Python CLI once per input.
 ///
 /// All progress is written into `store` so the `/jobs` UI can display it.
-/// Replace the inner log with a real subprocess call in Phase 3.
 pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>, store: JobStore) {
-    macro_rules! job_log {
-        ($id:expr, $store:expr, $($arg:tt)*) => {{
-            let line = format!($($arg)*);
-            log::info!("{}", line);
-            $store.append_log($id, line);
-        }};
-    }
-
     log::info!("workflow job worker started");
     while let Some(job) = receiver.recv().await {
-        let id = job.id;
-        store.mark_running(id);
-
-        job_log!(
-            id,
-            store,
-            "job {id}: started op={} target_type={:?} target={} paths={:?}",
-            job.operation.as_str(),
-            job.target_type,
-            job.target_id_or_path,
-            job.resolved_paths,
-        );
-
-        let mut local_paths: Vec<PathBuf> = Vec::new();
-        let mut failed = false;
-
-        for raw in &job.resolved_paths {
-            let path = PathBuf::from(raw);
-            match ensure_local(&path).await {
-                Ok(local) => {
-                    job_log!(id, store, "job {id}: normalized {:?} → {:?}", path, local);
-                    local_paths.push(local);
-                }
-                Err(e) => {
-                    job_log!(
-                        id,
-                        store,
-                        "job {id}: could not normalize path {:?}: {e}",
-                        path
-                    );
-                    failed = true;
-                    break;
-                }
-            }
-        }
-
-        if failed {
-            job_log!(id, store, "job {id}: failed — path normalization error");
-            store.mark_failed(id);
-            continue;
-        }
-
-        job_log!(
-            id,
-            store,
-            "job {id}: ready to dispatch op={} local_paths={:?}",
-            job.operation.as_str(),
-            local_paths,
-        );
-        // TODO(phase-3): spawn music_operations Python subprocess with local_paths
-        store.mark_done(id);
+        process_job(&store, job).await;
     }
     log::info!("workflow job worker stopped");
+}
+
+macro_rules! job_log {
+    ($id:expr, $store:expr, $($arg:tt)*) => {{
+        let line = format!($($arg)*);
+        log::info!("{}", line);
+        $store.append_log($id, line);
+    }};
+}
+
+async fn process_job(store: &JobStore, job: WorkflowJob) {
+    let id = job.id;
+    store.mark_running(id);
+
+    job_log!(
+        id,
+        store,
+        "job {id}: started op={} target_type={:?} target={} paths={:?} output_dir={:?}",
+        job.operation.as_str(),
+        job.target_type,
+        job.target_id_or_path,
+        job.resolved_paths,
+        job.output_dir,
+    );
+
+    // Short-circuit operations the external CLI does not support yet.
+    let cli_op = match operation_cli_name(&job.operation) {
+        Some(name) => name,
+        None => {
+            job_log!(
+                id,
+                store,
+                "job {id}: operation {:?} is not supported by the music-operations CLI yet",
+                job.operation
+            );
+            store.mark_failed(id);
+            return;
+        }
+    };
+
+    if job.resolved_paths.is_empty() {
+        job_log!(id, store, "job {id}: no resolved input paths to dispatch");
+        store.mark_failed(id);
+        return;
+    }
+
+    // Normalise every input path (hydrate OneDrive placeholders / copy to
+    // temp dir on failure).
+    let mut local_paths: Vec<PathBuf> = Vec::new();
+    for raw in &job.resolved_paths {
+        let path = PathBuf::from(raw);
+        match ensure_local(&path).await {
+            Ok(local) => {
+                job_log!(id, store, "job {id}: normalized {:?} → {:?}", path, local);
+                local_paths.push(local);
+            }
+            Err(e) => {
+                job_log!(
+                    id,
+                    store,
+                    "job {id}: could not normalize path {:?}: {e}",
+                    path
+                );
+                store.mark_failed(id);
+                return;
+            }
+        }
+    }
+
+    // Dispatch one subprocess per input.  Any non-zero exit fails the job.
+    let bin = music_operations_bin();
+    for input in &local_paths {
+        let output_dir = match resolve_output_dir(&job, input) {
+            Ok(d) => d,
+            Err(e) => {
+                job_log!(id, store, "job {id}: could not resolve output dir: {e}");
+                store.mark_failed(id);
+                return;
+            }
+        };
+
+        job_log!(
+            id,
+            store,
+            "job {id}: spawning `{bin} --operation {cli_op} --input-file {} --output-dir {}`",
+            input.display(),
+            output_dir.display(),
+        );
+
+        match spawn_music_operations(id, store, &bin, cli_op, input, &output_dir).await {
+            Ok(0) => {
+                job_log!(id, store, "job {id}: subprocess exited 0");
+            }
+            Ok(code) => {
+                job_log!(id, store, "job {id}: subprocess exited with code {code}");
+                store.mark_failed(id);
+                return;
+            }
+            Err(e) => {
+                job_log!(id, store, "job {id}: subprocess spawn failed: {e}");
+                store.mark_failed(id);
+                return;
+            }
+        }
+    }
+
+    store.mark_done(id);
+}
+
+/// Decide the `--output-dir` passed to the subprocess for `input`.
+///
+/// Uses the job's explicit `output_dir` when present; otherwise falls back to
+/// the input's parent directory so generated artefacts land next to the
+/// source file.
+fn resolve_output_dir(job: &WorkflowJob, input: &Path) -> Result<PathBuf, String> {
+    if let Some(explicit) = job.output_dir.as_deref().filter(|s| !s.is_empty()) {
+        return Ok(PathBuf::from(explicit));
+    }
+    input
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("input path {:?} has no parent directory", input))
+}
+
+/// Run one `music-operations` invocation, tailing stdout/stderr into the
+/// job's log.  Returns the subprocess exit code.
+async fn spawn_music_operations(
+    id: u64,
+    store: &JobStore,
+    bin: &str,
+    cli_op: &str,
+    input: &Path,
+    output_dir: &Path,
+) -> std::io::Result<i32> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
+
+    let mut cmd = Command::new(bin);
+    cmd.arg("--operation")
+        .arg(cli_op)
+        .arg("--input-file")
+        .arg(input)
+        .arg("--output-dir")
+        .arg(output_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    // Forward stdout/stderr line-by-line so UI users get live progress.
+    let stdout_task = stdout.map(|out| {
+        let store = store.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(out).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                store.append_log(id, format!("[stdout] {line}"));
+            }
+        })
+    });
+    let stderr_task = stderr.map(|err| {
+        let store = store.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(err).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                store.append_log(id, format!("[stderr] {line}"));
+            }
+        })
+    });
+
+    let status = child.wait().await?;
+    if let Some(t) = stdout_task {
+        let _ = t.await;
+    }
+    if let Some(t) = stderr_task {
+        let _ = t.await;
+    }
+
+    Ok(status.code().unwrap_or(-1))
 }
 
 // ============================================================================
@@ -710,6 +865,7 @@ mod tests {
             target_id_or_path: path.to_string(),
             operation: Operation::Hitpoints,
             resolved_paths: vec![path.to_string()],
+            output_dir: None,
         };
 
         let id1 = queue
@@ -735,6 +891,248 @@ mod tests {
             received2.id, id2,
             "received job id {} != expected {id2}",
             received2.id
+        );
+    }
+
+    // --- Phase 3: subprocess dispatch plumbing ---
+
+    /// Shared lock guarding tests that mutate process-wide env vars, since
+    /// `cargo test` runs tests in parallel by default.  Holding this lock
+    /// for the duration of such a test prevents the
+    /// `MUSIC_OPERATIONS_BIN` value seen by one test from bleeding into
+    /// another.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_operation_cli_name_maps_supported_ops() {
+        let cases = [
+            (Operation::GenerateSheetMusic, Some("anthemscore")),
+            (Operation::Repomix, Some("repomix")),
+            (Operation::Hitpoints, None),
+        ];
+        for (op, want) in cases {
+            assert_eq!(
+                operation_cli_name(&op),
+                want,
+                "unexpected CLI name for {op:?}: got {:?}, want {want:?}",
+                operation_cli_name(&op)
+            );
+        }
+    }
+
+    #[test]
+    fn test_music_operations_bin_default_and_override() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        std::env::remove_var(MUSIC_OPERATIONS_BIN_ENV);
+        assert_eq!(
+            music_operations_bin(),
+            "music-operations",
+            "expected default when {} is unset",
+            MUSIC_OPERATIONS_BIN_ENV
+        );
+
+        std::env::set_var(MUSIC_OPERATIONS_BIN_ENV, "/opt/custom/music-ops");
+        assert_eq!(
+            music_operations_bin(),
+            "/opt/custom/music-ops",
+            "expected override when {} is set",
+            MUSIC_OPERATIONS_BIN_ENV
+        );
+        std::env::remove_var(MUSIC_OPERATIONS_BIN_ENV);
+    }
+
+    #[test]
+    fn test_resolve_output_dir_uses_explicit_when_set() {
+        let job = WorkflowJob {
+            id: 1,
+            target_type: TargetType::Song,
+            target_id_or_path: "1".into(),
+            operation: Operation::GenerateSheetMusic,
+            resolved_paths: vec!["/in/song.wav".into()],
+            output_dir: Some("/explicit/out".into()),
+        };
+        let got = resolve_output_dir(&job, Path::new("/in/song.wav"))
+            .expect("resolve_output_dir should succeed");
+        assert_eq!(
+            got,
+            PathBuf::from("/explicit/out"),
+            "expected explicit output_dir to be used, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_output_dir_falls_back_to_parent() {
+        let job = WorkflowJob {
+            id: 1,
+            target_type: TargetType::File,
+            target_id_or_path: "/in/song.wav".into(),
+            operation: Operation::Repomix,
+            resolved_paths: vec!["/in/song.wav".into()],
+            output_dir: None,
+        };
+        let got = resolve_output_dir(&job, Path::new("/in/song.wav"))
+            .expect("resolve_output_dir should succeed");
+        assert_eq!(
+            got,
+            PathBuf::from("/in"),
+            "expected parent directory fallback, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_output_dir_treats_empty_string_as_unset() {
+        let job = WorkflowJob {
+            id: 1,
+            target_type: TargetType::File,
+            target_id_or_path: "/in/song.wav".into(),
+            operation: Operation::Repomix,
+            resolved_paths: vec!["/in/song.wav".into()],
+            output_dir: Some(String::new()),
+        };
+        let got = resolve_output_dir(&job, Path::new("/in/song.wav"))
+            .expect("resolve_output_dir should succeed");
+        assert_eq!(
+            got,
+            PathBuf::from("/in"),
+            "empty string output_dir should fall back to parent, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_output_dir_errors_when_input_has_no_parent() {
+        let job = WorkflowJob {
+            id: 1,
+            target_type: TargetType::File,
+            target_id_or_path: "/".into(),
+            operation: Operation::Repomix,
+            resolved_paths: vec!["/".into()],
+            output_dir: None,
+        };
+        let err =
+            resolve_output_dir(&job, Path::new("/")).expect_err("expected Err for rootless input");
+        assert!(
+            err.contains("no parent"),
+            "error message {err:?} should mention missing parent"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_job_hitpoints_marks_failed_with_clear_log() {
+        let store = JobStore::new();
+        let job = WorkflowJob {
+            id: 42,
+            target_type: TargetType::File,
+            target_id_or_path: "/tmp/whatever.wav".into(),
+            operation: Operation::Hitpoints,
+            resolved_paths: vec!["/tmp/whatever.wav".into()],
+            output_dir: None,
+        };
+        // Pre-register so mark_running/mark_failed affect the record.
+        store.register(job.clone());
+
+        process_job(&store, job).await;
+
+        let rec = store
+            .get(42)
+            .expect("expected job record #42 in store after process_job");
+        assert_eq!(
+            rec.status,
+            JobStatus::Failed,
+            "expected Hitpoints job to fail (unsupported by CLI), got {:?} with log={:?}",
+            rec.status,
+            rec.log_lines
+        );
+        assert!(
+            rec.log_lines
+                .iter()
+                .any(|l| l.contains("not supported by the music-operations CLI")),
+            "expected unsupported-op message in log, got lines={:?}",
+            rec.log_lines
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_job_empty_resolved_paths_fails_fast() {
+        let store = JobStore::new();
+        let job = WorkflowJob {
+            id: 99,
+            target_type: TargetType::Song,
+            target_id_or_path: "1".into(),
+            operation: Operation::Repomix,
+            resolved_paths: vec![],
+            output_dir: Some("/tmp/out".into()),
+        };
+        store.register(job.clone());
+
+        process_job(&store, job).await;
+
+        let rec = store.get(99).expect("record #99 missing after process_job");
+        assert_eq!(
+            rec.status,
+            JobStatus::Failed,
+            "empty resolved_paths should fail; got {:?} log={:?}",
+            rec.status,
+            rec.log_lines
+        );
+        assert!(
+            rec.log_lines
+                .iter()
+                .any(|l| l.contains("no resolved input")),
+            "expected no-input diagnostic, got lines={:?}",
+            rec.log_lines
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_job_missing_binary_marks_failed() {
+        // Scope the env-var guard so it is released before we await — holding
+        // a `std::sync::MutexGuard` across `.await` trips
+        // `clippy::await_holding_lock`.  The subprocess we spawn (which
+        // doesn't actually exist) reads the env var at spawn time, so the
+        // lock is only needed while setting/clearing it.
+        {
+            let _guard = ENV_LOCK.lock().expect("env lock");
+            std::env::set_var(
+                MUSIC_OPERATIONS_BIN_ENV,
+                "/nonexistent/definitely_not_a_real_binary_xyz",
+            );
+        }
+
+        let mut src = NamedTempFile::new().expect("tempfile");
+        src.write_all(b"fake wav").expect("write");
+        let input = src.path().to_path_buf();
+
+        let store = JobStore::new();
+        let job = WorkflowJob {
+            id: 7,
+            target_type: TargetType::File,
+            target_id_or_path: input.display().to_string(),
+            operation: Operation::Repomix,
+            resolved_paths: vec![input.display().to_string()],
+            output_dir: None,
+        };
+        store.register(job.clone());
+
+        process_job(&store, job).await;
+        {
+            let _guard = ENV_LOCK.lock().expect("env lock");
+            std::env::remove_var(MUSIC_OPERATIONS_BIN_ENV);
+        }
+
+        let rec = store.get(7).expect("record #7 missing after process_job");
+        assert_eq!(
+            rec.status,
+            JobStatus::Failed,
+            "expected failure when binary is missing, got {:?} log={:?}",
+            rec.status,
+            rec.log_lines
+        );
+        assert!(
+            rec.log_lines
+                .iter()
+                .any(|l| l.contains("spawn failed") || l.contains("subprocess")),
+            "expected spawn-failure diagnostic, got lines={:?}",
+            rec.log_lines
         );
     }
 }

@@ -61,6 +61,12 @@
             <span class="detail-label">Log lines</span>
             <span class="detail-value">{{ row.log_count }}</span>
         </div>
+        {% if !row.output_dir.is_empty() %}
+        <div class="detail-row">
+            <span class="detail-label">Output dir</span>
+            <span class="detail-value"><code>{{ row.output_dir }}</code></span>
+        </div>
+        {% endif %}
     </div>
     <div class="detail-card">
         <h3>Resolved paths</h3>

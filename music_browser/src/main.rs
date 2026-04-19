@@ -191,6 +191,7 @@ struct JobRowView {
     target: String,
     log_count: usize,
     resolved_paths: Vec<String>,
+    output_dir: String,
 }
 
 #[derive(Template)]
@@ -218,6 +219,7 @@ fn job_to_row(r: &JobRecord) -> JobRowView {
         target: r.job.target_id_or_path.clone(),
         log_count: r.log_lines.len(),
         resolved_paths: r.job.resolved_paths.clone(),
+        output_dir: r.job.output_dir.clone().unwrap_or_default(),
     }
 }
 
@@ -1931,7 +1933,8 @@ async fn workflows_enqueue(
         actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
     })?;
 
-    let resolved_paths = resolve_paths(&pool, &target_type, &body.target_id_or_path).await?;
+    let (resolved_paths, output_dir) =
+        resolve_paths(&pool, &target_type, &operation, &body.target_id_or_path).await?;
 
     let job = WorkflowJob {
         id: 0,
@@ -1939,6 +1942,7 @@ async fn workflows_enqueue(
         target_id_or_path: body.target_id_or_path.clone(),
         operation,
         resolved_paths,
+        output_dir,
     };
 
     let job_id = queue
@@ -1952,16 +1956,24 @@ async fn workflows_enqueue(
     })))
 }
 
-/// Resolve a target to a list of absolute file-system paths.
+/// Resolve a target to a list of subprocess input paths and an optional
+/// `--output-dir` for the `music-operations` CLI.
 ///
-/// For `Song` and `LiveSet` targets `target_id_or_path` is a numeric ID string;
-/// the handler queries the DB and returns the relevant folder/project paths.
-/// For `File` and `Directory` targets the value is used as-is.
+/// The semantics are operation-aware:
+///
+/// | Target           | Operation            | Inputs                                      | Output dir           |
+/// |------------------|----------------------|---------------------------------------------|----------------------|
+/// | `Song`           | GenerateSheetMusic   | every `.wav` found under `export_folder`    | `scores_folder`      |
+/// | `Song`           | Repomix              | `practice_project_path` (fallback: export)  | `export_folder`      |
+/// | `Song`           | Hitpoints            | `export_folder`                             | `export_folder`      |
+/// | `LiveSet`        | *                    | live-set name (opaque, handled by CLI)      | `None`               |
+/// | `File`/`Directory` | *                  | the path itself (after hydration check)     | `None` (uses parent) |
 async fn resolve_paths(
     pool: &SqlitePool,
     target_type: &TargetType,
+    operation: &Operation,
     target_id_or_path: &str,
-) -> actix_web::Result<Vec<String>> {
+) -> actix_web::Result<(Vec<String>, Option<String>)> {
     match target_type {
         TargetType::Song => {
             let id: i64 = target_id_or_path
@@ -1971,17 +1983,8 @@ async fn resolve_paths(
                 .await
                 .map_err(actix_web::error::ErrorInternalServerError)?
                 .ok_or_else(|| actix_web::error::ErrorNotFound("song not found"))?;
-            let mut paths = Vec::new();
-            for p in [
-                &song.scores_folder,
-                &song.practice_project_path,
-                &song.export_folder,
-            ] {
-                if !p.is_empty() {
-                    paths.push(p.clone());
-                }
-            }
-            Ok(paths)
+
+            resolve_song_paths(&song, operation)
         }
         TargetType::LiveSet => {
             let id: i64 = target_id_or_path
@@ -1991,7 +1994,7 @@ async fn resolve_paths(
                 .await
                 .map_err(actix_web::error::ErrorInternalServerError)?
                 .ok_or_else(|| actix_web::error::ErrorNotFound("live_set not found"))?;
-            Ok(vec![set.name.clone()])
+            Ok((vec![set.name.clone()], None))
         }
         TargetType::File | TargetType::Directory => {
             let path = std::path::Path::new(target_id_or_path);
@@ -2007,11 +2010,96 @@ async fn resolve_paths(
                     )))
                 }
                 music_browser::jobs::HydrationStatus::Hydrated => {
-                    Ok(vec![target_id_or_path.to_string()])
+                    Ok((vec![target_id_or_path.to_string()], None))
                 }
             }
         }
     }
+}
+
+/// Operation-aware resolution for `Song` targets.
+fn resolve_song_paths(
+    song: &music_browser::db::models::Song,
+    operation: &Operation,
+) -> actix_web::Result<(Vec<String>, Option<String>)> {
+    let non_empty = |s: &str| {
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
+    };
+
+    match operation {
+        Operation::GenerateSheetMusic => {
+            // AnthemScore needs a .wav file.  Scan the configured export
+            // folder for audio; if it is itself a file, use it directly.
+            let export = non_empty(&song.export_folder).ok_or_else(|| {
+                actix_web::error::ErrorUnprocessableEntity(
+                    "song has no export_folder configured — required for generate_sheet_music",
+                )
+            })?;
+            let inputs = find_wav_inputs(&export)?;
+            if inputs.is_empty() {
+                return Err(actix_web::error::ErrorUnprocessableEntity(format!(
+                    "no .wav files found at or under {export}"
+                )));
+            }
+            let output = non_empty(&song.scores_folder).unwrap_or(export);
+            Ok((inputs, Some(output)))
+        }
+        Operation::Repomix => {
+            let input = non_empty(&song.practice_project_path)
+                .or_else(|| non_empty(&song.export_folder))
+                .ok_or_else(|| {
+                    actix_web::error::ErrorUnprocessableEntity(
+                        "song has no practice_project_path or export_folder to pack",
+                    )
+                })?;
+            let output = non_empty(&song.export_folder).unwrap_or_else(|| input.clone());
+            Ok((vec![input], Some(output)))
+        }
+        Operation::Hitpoints => {
+            let input = non_empty(&song.export_folder).ok_or_else(|| {
+                actix_web::error::ErrorUnprocessableEntity(
+                    "song has no export_folder configured — required for hitpoints",
+                )
+            })?;
+            let output = input.clone();
+            Ok((vec![input], Some(output)))
+        }
+    }
+}
+
+/// Return `[path]` when `root` is an existing `.wav` file, or all `.wav`
+/// files directly inside `root` when it is a directory.  Does not recurse.
+fn find_wav_inputs(root: &str) -> actix_web::Result<Vec<String>> {
+    let p = std::path::Path::new(root);
+    let meta = std::fs::metadata(p).map_err(|e| {
+        actix_web::error::ErrorUnprocessableEntity(format!("cannot stat {root}: {e}"))
+    })?;
+    if meta.is_file() {
+        return Ok(vec![root.to_string()]);
+    }
+    let read = std::fs::read_dir(p).map_err(|e| {
+        actix_web::error::ErrorUnprocessableEntity(format!("cannot read {root}: {e}"))
+    })?;
+    let mut out: Vec<String> = Vec::new();
+    for entry in read.flatten() {
+        let path = entry.path();
+        let is_wav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            .unwrap_or(false);
+        if is_wav && path.is_file() {
+            if let Some(s) = path.to_str() {
+                out.push(s.to_string());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 pub fn configure_app(cfg: &mut web::ServiceConfig) {

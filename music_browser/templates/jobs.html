@@ -58,11 +58,12 @@
         </div>
         <div class="form-group">
             <label>Operation</label>
-            <select id="eq-operation">
+            <select id="eq-operation" onchange="updateOpHint()">
                 <option value="generate_sheet_music">generate_sheet_music</option>
                 <option value="repomix">repomix</option>
                 <option value="hitpoints">hitpoints</option>
             </select>
+            <div id="op-hint" class="text-muted" style="font-size:.75rem;margin-top:.3rem;line-height:1.3;"></div>
         </div>
         <div class="form-group" style="flex:0">
             <label>&nbsp;</label>
@@ -104,6 +105,17 @@
 {% endif %}
 
 <script>
+const OP_HINTS = {
+    generate_sheet_music: '⚠ Requires <strong>AnthemScore</strong> to be installed (configured in the music-operations bundle).',
+    repomix: 'Packs the target directory with Repomix.',
+    hitpoints: 'Not yet wired to an external CLI — jobs will be marked failed.',
+};
+function updateOpHint() {
+    const op = document.getElementById('eq-operation').value;
+    document.getElementById('op-hint').innerHTML = OP_HINTS[op] || '';
+}
+updateOpHint();
+
 async function submitJob() {
     const payload = {
         target_type: document.getElementById('eq-target-type').value,
