@@ -2236,7 +2236,22 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
             web::post().to(practice_priority_update),
         )
         // Workflow jobs API
-        .route("/api/workflows", web::post().to(workflows_enqueue))
+        .service(
+            web::resource("/api/workflows")
+                .route(
+                    web::post()
+                        .guard(actix_web::guard::fn_guard(|req| {
+                            req.head()
+                                .headers
+                                .get("content-type")
+                                .and_then(|h| h.to_str().ok())
+                                .map(|s| s.starts_with("multipart/form-data"))
+                                .unwrap_or(false)
+                        }))
+                        .to(workflows_enqueue_upload),
+                )
+                .route(web::post().to(workflows_enqueue)),
+        )
         // Job monitor UI
         .route("/jobs", web::get().to(jobs_list))
         .route("/jobs/{id}", web::get().to(job_detail));
@@ -2282,4 +2297,77 @@ async fn main() -> std::io::Result<()> {
     .bind(&bind)?
     .run()
     .await
+}
+
+use actix_multipart::form::MultipartForm;
+
+#[derive(actix_multipart::form::MultipartForm)]
+struct WorkflowUploadForm {
+    #[multipart(rename = "target_type")]
+    target_type: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "target_id_or_path")]
+    target_id_or_path: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "operation")]
+    operation: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "audio_file")]
+    audio_file: Option<actix_multipart::form::tempfile::TempFile>,
+}
+
+async fn workflows_enqueue_upload(
+    pool: web::Data<sqlx::SqlitePool>,
+    queue: web::Data<JobQueue>,
+    MultipartForm(form): MultipartForm<WorkflowUploadForm>,
+) -> actix_web::Result<HttpResponse> {
+    let target_type_str = form.target_type.into_inner();
+    let target_type = match target_type_str.as_str() {
+        "song" => TargetType::Song,
+        "live_set" => TargetType::LiveSet,
+        "file" => TargetType::File,
+        "directory" => TargetType::Directory,
+        other => {
+            return Err(actix_web::error::ErrorBadRequest(format!(
+                "unknown target_type: {other}"
+            )))
+        }
+    };
+
+    let op_str = form.operation.into_inner();
+    let operation = Operation::parse(&op_str).ok_or_else(|| {
+        actix_web::error::ErrorBadRequest(format!("unknown operation: {}", op_str))
+    })?;
+
+    let mut target_id_or_path = form.target_id_or_path.into_inner();
+
+    if let Some(file) = form.audio_file {
+        let temp_dir = std::env::temp_dir().join("pmb_uploads");
+        std::fs::create_dir_all(&temp_dir)?;
+        let file_name = file.file_name.unwrap_or_else(|| "upload.wav".to_string());
+        let dest = temp_dir.join(format!("{}_{}", uuid::Uuid::new_v4(), file_name));
+        file.file
+            .persist(&dest)
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        target_id_or_path = dest.to_string_lossy().to_string();
+    }
+
+    let (resolved_paths, output_dir) =
+        resolve_paths(&pool, &target_type, &operation, &target_id_or_path).await?;
+
+    let job = WorkflowJob {
+        id: 0,
+        target_type,
+        target_id_or_path,
+        operation,
+        resolved_paths,
+        output_dir,
+    };
+
+    let job_id = queue
+        .enqueue(job)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "ok": true,
+        "job_id": job_id
+    })))
 }

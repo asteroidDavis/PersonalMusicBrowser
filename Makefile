@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -22,3 +22,12 @@ ara-plugin:
 
 ara-clean:
 	rm -rf music_ara_client/build music_ara_client/build-plugin music_ara_client/build-precommit
+
+# Rust commands
+rust-clean:
+	@. ~/.cargo/env && cd music_browser && cargo clean
+	@rm -rf music_browser/target
+	@echo "Cleaned Rust target directories."
+
+rust-run:
+	@. ~/.cargo/env && cd music_browser && cargo run --bin music-browser

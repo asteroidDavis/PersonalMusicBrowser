@@ -35,16 +35,18 @@ public:
 private:
     void refreshSelectedPath();
     void onSendClicked();
+    void proceedWithFile(std::string path);
     void showStatus(const juce::String& text, juce::Colour colour);
 
     SendToHubProcessor& processor_;
 
-    juce::Label       selectedPathLabel_  { {}, "Selected clip: (none)" };
-    juce::ComboBox    operationBox_;
-    juce::TextButton  sendButton_         { "Send to Music Browser" };
-    juce::TextButton  refreshButton_      { "Refresh selection" };
-    juce::Label       statusLabel_        { {}, "" };
-    juce::TextEditor  hubUrlEditor_;
+    juce::Label selectedPathLabel_{{}, "Selected clip: (none)"};
+    juce::ComboBox operationBox_;
+    juce::TextButton sendButton_{"Send to Music Browser"};
+    juce::TextButton refreshButton_{"Refresh selection"};
+    juce::Label statusLabel_{{}, ""};
+    juce::TextEditor hubUrlEditor_;
+    std::unique_ptr<juce::FileChooser> fileChooser_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SendToHubEditor)
 };

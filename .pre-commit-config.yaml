@@ -1,0 +1,36 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path music_browser/Cargo.toml -- --check
+        language: system
+        pass_filenames: false
+        files: ^music_browser/.*\.rs$
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path music_browser/Cargo.toml -- -D warnings
+        language: system
+        pass_filenames: false
+        files: ^music_browser/.*\.rs$
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --manifest-path music_browser/Cargo.toml
+        language: system
+        pass_filenames: false
+        files: ^music_browser/.*\.(rs|sql|html)$
+
+      - id: clang-format
+        name: clang-format (music_ara_client)
+        entry: clang-format -i --style=file
+        language: system
+        files: ^music_ara_client/(src|tests)/.*\.(cpp|h)$
+
+      - id: cpp-core-tests
+        name: music_ara_client core unit tests
+        entry: bash -c 'cmake -S music_ara_client -B music_ara_client/build-precommit -DMUSIC_ARA_BUILD_PLUGIN=OFF -DMUSIC_ARA_BUILD_TESTS=ON >/dev/null && cmake --build music_ara_client/build-precommit --target sendtohub_core_tests -j && ctest --test-dir music_ara_client/build-precommit --output-on-failure'
+        language: system
+        pass_filenames: false
+        files: ^music_ara_client/.*\.(cpp|h|txt)$

@@ -12,8 +12,8 @@ bool looksAbsolute(std::string_view candidate) {
         return true;
     }
     // Windows drive letter — `C:\foo` or `C:/foo`.
-    if (candidate.size() >= 3 && std::isalpha(static_cast<unsigned char>(candidate[0]))
-        && candidate[1] == ':' && (candidate[2] == '\\' || candidate[2] == '/')) {
+    if (candidate.size() >= 3 && std::isalpha(static_cast<unsigned char>(candidate[0])) &&
+        candidate[1] == ':' && (candidate[2] == '\\' || candidate[2] == '/')) {
         return true;
     }
     return false;
@@ -21,12 +21,12 @@ bool looksAbsolute(std::string_view candidate) {
 
 std::string normalizeCandidate(std::string_view candidate) {
     constexpr std::string_view fileScheme = "file://";
-    if (candidate.size() >= fileScheme.size()
-        && candidate.substr(0, fileScheme.size()) == fileScheme) {
+    if (candidate.size() >= fileScheme.size() &&
+        candidate.substr(0, fileScheme.size()) == fileScheme) {
         candidate.remove_prefix(fileScheme.size());
         // Optional third slash for `file:///` — collapse to a single leading `/`.
-        if (!candidate.empty() && candidate.front() == '/' && candidate.size() > 1
-            && candidate[1] == '/') {
+        if (!candidate.empty() && candidate.front() == '/' && candidate.size() > 1 &&
+            candidate[1] == '/') {
             candidate.remove_prefix(1);
         }
     }
@@ -34,6 +34,10 @@ std::string normalizeCandidate(std::string_view candidate) {
     if (candidate.size() >= 2 && candidate[0] == '/' && candidate[1] == '/') {
         candidate.remove_prefix(1);
     }
+
+    // Check if Cubase handed us an un-escaped relative path like `Audio/Bass hpf amp_04.wav`
+    // and attempt to see if we can resolve it (if we had project directory access).
+    // For now we just return the normalized candidate if it exists.
     return std::string(candidate);
 }
 
@@ -48,6 +52,13 @@ std::string extractAbsolutePath(const AudioSourceIdentity& identity) {
     if (looksAbsolute(normalizedName)) {
         return normalizedName;
     }
+
+    // If both look relative but the user expects us to find a file in the project's Audio dir,
+    // we can at least return what we know.
+    if (!normalizedName.empty() && normalizedName.find("Audio/") == 0) {
+        return normalizedName;
+    }
+
     return {};
 }
 

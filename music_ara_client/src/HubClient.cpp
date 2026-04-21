@@ -7,17 +7,29 @@ namespace music_ara_client {
 
 const char* operationWireName(Operation op) {
     switch (op) {
-        case Operation::GenerateSheetMusic: return "generate_sheet_music";
-        case Operation::Repomix:            return "repomix";
-        case Operation::Hitpoints:          return "hitpoints";
+        case Operation::GenerateSheetMusic:
+            return "generate_sheet_music";
+        case Operation::Repomix:
+            return "repomix";
+        case Operation::Hitpoints:
+            return "hitpoints";
     }
     return "generate_sheet_music";
 }
 
 bool parseOperation(std::string_view wire, Operation& out) {
-    if (wire == "generate_sheet_music") { out = Operation::GenerateSheetMusic; return true; }
-    if (wire == "repomix")              { out = Operation::Repomix;            return true; }
-    if (wire == "hitpoints")            { out = Operation::Hitpoints;          return true; }
+    if (wire == "generate_sheet_music") {
+        out = Operation::GenerateSheetMusic;
+        return true;
+    }
+    if (wire == "repomix") {
+        out = Operation::Repomix;
+        return true;
+    }
+    if (wire == "hitpoints") {
+        out = Operation::Hitpoints;
+        return true;
+    }
     return false;
 }
 
@@ -27,13 +39,27 @@ void appendJsonEscaped(std::string& out, std::string_view value) {
     out.push_back('"');
     for (char c : value) {
         switch (c) {
-            case '"':  out.append("\\\"");  break;
-            case '\\': out.append("\\\\");  break;
-            case '\b': out.append("\\b");   break;
-            case '\f': out.append("\\f");   break;
-            case '\n': out.append("\\n");   break;
-            case '\r': out.append("\\r");   break;
-            case '\t': out.append("\\t");   break;
+            case '"':
+                out.append("\\\"");
+                break;
+            case '\\':
+                out.append("\\\\");
+                break;
+            case '\b':
+                out.append("\\b");
+                break;
+            case '\f':
+                out.append("\\f");
+                break;
+            case '\n':
+                out.append("\\n");
+                break;
+            case '\r':
+                out.append("\\r");
+                break;
+            case '\t':
+                out.append("\\t");
+                break;
             default:
                 if (static_cast<unsigned char>(c) < 0x20) {
                     char buf[8];
@@ -60,20 +86,17 @@ std::string buildJsonBody(const HubRequest& request) {
     return out;
 }
 
-bool sendRequest(const HubRequest& request,
-                 std::string_view  url,
-                 const HttpPoster& post,
-                 std::string&      errorOut) {
+bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post,
+                 std::string& errorOut) {
     if (!post) {
         errorOut = "no HTTP poster configured";
         return false;
     }
-    if (request.absoluteFilePath.empty()) {
+    if (request.absoluteFilePath.empty() && request.exportedWavPath.empty()) {
         errorOut = "refusing to POST: empty file path (ARA audio source did not expose one)";
         return false;
     }
-    const auto body = buildJsonBody(request);
-    return post(url, body, errorOut);
+    return post(url, request, errorOut);
 }
 
 }  // namespace music_ara_client

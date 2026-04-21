@@ -46,10 +46,10 @@ public:
     void getStateInformation(juce::MemoryBlock&) override {}
     void setStateInformation(const void*, int) override {}
 
-    /// Walks the current ARA document and returns the absolute path of the
-    /// most-recently-touched region's audio source, or an empty string if no
-    /// ARA host is attached or no selection is available.
-    std::string getLastSelectedAudioFilePath() const;
+    /// Walks the current ARA document and returns the most-recently-touched
+    /// region's audio source, or nullptr if no ARA host is attached or no
+    /// selection is available.
+    const ARA::PlugIn::AudioSource* getLastSelectedAudioSource() const;
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SendToHubProcessor)

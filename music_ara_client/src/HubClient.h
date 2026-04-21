@@ -37,7 +37,9 @@ bool parseOperation(std::string_view wire, Operation& out);
 
 struct HubRequest {
     std::string absoluteFilePath;
-    Operation   operation = Operation::GenerateSheetMusic;
+    Operation operation = Operation::GenerateSheetMusic;
+    // If populated, we send a multipart/form-data request with the actual audio file
+    std::string exportedWavPath;
 };
 
 /// Builds the JSON body exactly as the hub expects.  Performs minimal but
@@ -48,14 +50,12 @@ std::string buildJsonBody(const HubRequest& request);
 constexpr std::string_view kDefaultHubUrl = "http://localhost:3000/api/workflows";
 
 using HttpPoster =
-    std::function<bool(std::string_view url, std::string_view jsonBody, std::string& errorOut)>;
+    std::function<bool(std::string_view url, const HubRequest& request, std::string& errorOut)>;
 
 /// Sends `request` to `url` via `post` and writes any transport error into
 /// `errorOut`.  Returns true iff the POST completed with a 2xx response
 /// (signalling is delegated to `post`).
-bool sendRequest(const HubRequest& request,
-                 std::string_view  url,
-                 const HttpPoster& post,
-                 std::string&      errorOut);
+bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post,
+                 std::string& errorOut);
 
 }  // namespace music_ara_client

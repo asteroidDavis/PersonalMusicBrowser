@@ -15,7 +15,7 @@
 # or the ARA SDK is unavailable.
 
 cmake_minimum_required(VERSION 3.22)
-project(music_ara_client LANGUAGES CXX)
+project(music_ara_client LANGUAGES C CXX VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -83,14 +83,14 @@ if(MUSIC_ARA_BUILD_PLUGIN)
     )
     FetchContent_MakeAvailable(JUCE)
 
-    if(NOT DEFINED ARA_SDK_DIR)
+    if(NOT DEFINED ARA_SDK_DIR OR "${ARA_SDK_DIR}" STREQUAL "")
         FetchContent_Declare(
             ARA_SDK
             GIT_REPOSITORY https://github.com/Celemony/ARA_SDK.git
-            GIT_TAG        releases/2.3.0
+            GIT_TAG        releases/2.2.0
         )
         FetchContent_MakeAvailable(ARA_SDK)
-        set(ARA_SDK_DIR "${ARA_SDK_SOURCE_DIR}" CACHE PATH "" FORCE)
+        set(ARA_SDK_DIR "${ara_sdk_SOURCE_DIR}" CACHE PATH "" FORCE)
     endif()
 
     juce_set_ara_sdk_path("${ARA_SDK_DIR}")

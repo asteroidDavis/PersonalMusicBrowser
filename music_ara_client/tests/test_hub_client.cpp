@@ -35,12 +35,24 @@ std::optional<std::string> findString(const std::string& json, const std::string
         if (json[pos] == '\\' && pos + 1 < json.size()) {
             char esc = json[pos + 1];
             switch (esc) {
-                case '"':  out.push_back('"');  break;
-                case '\\': out.push_back('\\'); break;
-                case 'n':  out.push_back('\n'); break;
-                case 'r':  out.push_back('\r'); break;
-                case 't':  out.push_back('\t'); break;
-                default:   out.push_back(esc);  break;
+                case '"':
+                    out.push_back('"');
+                    break;
+                case '\\':
+                    out.push_back('\\');
+                    break;
+                case 'n':
+                    out.push_back('\n');
+                    break;
+                case 'r':
+                    out.push_back('\r');
+                    break;
+                case 't':
+                    out.push_back('\t');
+                    break;
+                default:
+                    out.push_back(esc);
+                    break;
             }
             pos += 2;
         } else {
@@ -54,27 +66,27 @@ std::optional<std::string> findString(const std::string& json, const std::string
 TEST(BuildJsonBody, MatchesHubSchemaForFileTarget) {
     HubRequest req;
     req.absoluteFilePath = "/home/nate/music/clip.wav";
-    req.operation        = Operation::GenerateSheetMusic;
+    req.operation = Operation::GenerateSheetMusic;
 
     const auto json = buildJsonBody(req);
 
     auto targetType = findString(json, "target_type");
-    auto path       = findString(json, "target_id_or_path");
-    auto operation  = findString(json, "operation");
+    auto path = findString(json, "target_id_or_path");
+    auto operation = findString(json, "operation");
 
     ASSERT_TRUE(targetType.has_value()) << "target_type missing in payload: " << json;
-    ASSERT_TRUE(path.has_value())       << "target_id_or_path missing in payload: " << json;
-    ASSERT_TRUE(operation.has_value())  << "operation missing in payload: " << json;
+    ASSERT_TRUE(path.has_value()) << "target_id_or_path missing in payload: " << json;
+    ASSERT_TRUE(operation.has_value()) << "operation missing in payload: " << json;
 
-    EXPECT_EQ(*targetType, "file")                        << "payload: " << json;
-    EXPECT_EQ(*path,       "/home/nate/music/clip.wav")   << "payload: " << json;
-    EXPECT_EQ(*operation,  "generate_sheet_music")        << "payload: " << json;
+    EXPECT_EQ(*targetType, "file") << "payload: " << json;
+    EXPECT_EQ(*path, "/home/nate/music/clip.wav") << "payload: " << json;
+    EXPECT_EQ(*operation, "generate_sheet_music") << "payload: " << json;
 }
 
 TEST(BuildJsonBody, EscapesDoubleQuotesAndBackslashes) {
     HubRequest req;
     req.absoluteFilePath = R"(C:\Users\nate\she said "hi".wav)";
-    req.operation        = Operation::Repomix;
+    req.operation = Operation::Repomix;
 
     const auto json = buildJsonBody(req);
     auto path = findString(json, "target_id_or_path");
@@ -85,7 +97,7 @@ TEST(BuildJsonBody, EscapesDoubleQuotesAndBackslashes) {
 TEST(BuildJsonBody, EscapesControlCharacters) {
     HubRequest req;
     req.absoluteFilePath = std::string("/tmp/a\tb\nc.wav");
-    req.operation        = Operation::Hitpoints;
+    req.operation = Operation::Hitpoints;
 
     const auto json = buildJsonBody(req);
     // Raw JSON must NOT contain the unescaped control bytes.
@@ -98,7 +110,7 @@ TEST(BuildJsonBody, EscapesControlCharacters) {
 TEST(OperationWire, RoundTripsAllVariants) {
     for (auto op : {Operation::GenerateSheetMusic, Operation::Repomix, Operation::Hitpoints}) {
         const std::string wire = operationWireName(op);
-        Operation         parsed{};
+        Operation parsed{};
         ASSERT_TRUE(parseOperation(wire, parsed))
             << "failed to parse wire name '" << wire << "' back to Operation";
         EXPECT_EQ(static_cast<int>(parsed), static_cast<int>(op))
@@ -119,14 +131,14 @@ TEST(SendRequest, RefusesEmptyPathWithoutCallingPoster) {
     req.operation = Operation::GenerateSheetMusic;
 
     bool posterCalled = false;
-    auto poster = [&](std::string_view, std::string_view, std::string&) {
+    auto poster = [&](std::string_view, const HubRequest&, std::string&) {
         posterCalled = true;
         return true;
     };
     std::string err;
-    const bool  ok = sendRequest(req, "http://localhost:3000/api/workflows", poster, err);
-    EXPECT_FALSE(ok)                        << "must refuse empty path";
-    EXPECT_FALSE(posterCalled)              << "poster must not be invoked for empty path";
+    const bool ok = sendRequest(req, "http://localhost:3000/api/workflows", poster, err);
+    EXPECT_FALSE(ok) << "must refuse empty path";
+    EXPECT_FALSE(posterCalled) << "poster must not be invoked for empty path";
     EXPECT_NE(err.find("empty file path"), std::string::npos)
         << "expected 'empty file path' in error, got: " << err;
 }
@@ -134,13 +146,13 @@ TEST(SendRequest, RefusesEmptyPathWithoutCallingPoster) {
 TEST(SendRequest, PassesBuiltBodyToPoster) {
     HubRequest req;
     req.absoluteFilePath = "/abs/song.wav";
-    req.operation        = Operation::Repomix;
+    req.operation = Operation::Repomix;
 
     std::string seenBody;
     std::string seenUrl;
-    auto poster = [&](std::string_view url, std::string_view body, std::string&) {
+    auto poster = [&](std::string_view url, const HubRequest& r, std::string&) {
         seenUrl.assign(url);
-        seenBody.assign(body);
+        seenBody.assign(buildJsonBody(r));
         return true;
     };
     std::string err;
@@ -154,14 +166,13 @@ TEST(SendRequest, PassesBuiltBodyToPoster) {
 TEST(SendRequest, SurfacesPosterError) {
     HubRequest req;
     req.absoluteFilePath = "/abs/song.wav";
-    auto poster = [](std::string_view, std::string_view, std::string& errorOut) {
+    auto poster = [](std::string_view, const HubRequest&, std::string& errorOut) {
         errorOut = "boom";
         return false;
     };
     std::string err;
     EXPECT_FALSE(sendRequest(req, "http://localhost:3000/api/workflows", poster, err));
-    EXPECT_EQ(err, "boom")
-        << "sendRequest must surface the poster's error message verbatim";
+    EXPECT_EQ(err, "boom") << "sendRequest must surface the poster's error message verbatim";
 }
 
 }  // namespace
