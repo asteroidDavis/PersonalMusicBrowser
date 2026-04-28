@@ -23,7 +23,7 @@ namespace {
 struct HostCase {
     const char* label;
     AudioSourceIdentity in;
-    std::string         expected;
+    std::string expected;
 };
 
 class HostConventionTest : public ::testing::TestWithParam<HostCase> {};
@@ -31,18 +31,16 @@ class HostConventionTest : public ::testing::TestWithParam<HostCase> {};
 TEST_P(HostConventionTest, ResolvesExpectedPath) {
     const auto& c = GetParam();
     const auto got = extractAbsolutePath(c.in);
-    EXPECT_EQ(got, c.expected)
-        << "host=" << c.label
-        << " persistentID=\"" << c.in.persistentID << "\""
-        << " name=\""         << c.in.name         << "\"";
+    EXPECT_EQ(got, c.expected) << "host=" << c.label << " persistentID=\"" << c.in.persistentID
+                               << "\""
+                               << " name=\"" << c.in.name << "\"";
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Hosts, HostConventionTest,
     ::testing::Values(
-        HostCase{"REAPER_posix",
-                 {"/home/nate/audio/clip.wav", "clip.wav"},
-                 "/home/nate/audio/clip.wav"},
+        HostCase{
+            "REAPER_posix", {"/home/nate/audio/clip.wav", "clip.wav"}, "/home/nate/audio/clip.wav"},
         HostCase{"Cubase_guid_with_path_in_name",
                  {"{8F2B3C5D-1234-4B56-9E01-ABCDEF012345}", "/Users/nate/OneDrive/track.wav"},
                  "/Users/nate/OneDrive/track.wav"},
@@ -55,23 +53,20 @@ INSTANTIATE_TEST_SUITE_P(
         HostCase{"Windows_drive_letter",
                  {"C:/Users/nate/audio/clip.wav", "clip.wav"},
                  "C:/Users/nate/audio/clip.wav"},
-        HostCase{"Windows_backslash_drive",
-                 {R"(D:\Music\song.wav)", "song"},
-                 R"(D:\Music\song.wav)"},
-        HostCase{"Both_opaque_returns_empty",
-                 {"uuid:abc-123", "unnamed"},
-                 ""}),
+        HostCase{
+            "Windows_backslash_drive", {R"(D:\Music\song.wav)", "song"}, R"(D:\Music\song.wav)"},
+        HostCase{"Both_opaque_returns_empty", {"uuid:abc-123", "unnamed"}, ""}),
     [](const ::testing::TestParamInfo<HostCase>& info) { return std::string(info.param.label); });
 
 TEST(AbsoluteDetection, RejectsRelativeAndEmpty) {
-    EXPECT_FALSE(looksAbsolute(""))               << "empty string must not be treated as absolute";
-    EXPECT_FALSE(looksAbsolute("relative/path"))  << "relative POSIX must be rejected";
-    EXPECT_FALSE(looksAbsolute("C:"))             << "bare drive letter must be rejected";
+    EXPECT_FALSE(looksAbsolute("")) << "empty string must not be treated as absolute";
+    EXPECT_FALSE(looksAbsolute("relative/path")) << "relative POSIX must be rejected";
+    EXPECT_FALSE(looksAbsolute("C:")) << "bare drive letter must be rejected";
 }
 
 TEST(Normalize, PassesThroughUnknownPrefixes) {
     EXPECT_EQ(normalizeCandidate("/already/normal.wav"), "/already/normal.wav");
-    EXPECT_EQ(normalizeCandidate("opaque-id"),           "opaque-id");
+    EXPECT_EQ(normalizeCandidate("opaque-id"), "opaque-id");
 }
 
 TEST(Normalize, StripsFileScheme) {
