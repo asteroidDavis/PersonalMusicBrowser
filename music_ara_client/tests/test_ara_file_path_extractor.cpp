@@ -31,30 +31,22 @@ class HostConventionTest : public ::testing::TestWithParam<HostCase> {};
 TEST_P(HostConventionTest, ResolvesExpectedPath) {
     const auto& c = GetParam();
     const auto got = extractAbsolutePath(c.in);
-    EXPECT_EQ(got, c.expected) << "host=" << c.label << " persistentID=\"" << c.in.persistentID
-                               << "\""
+    EXPECT_EQ(got, c.expected) << "host=" << c.label << " persistentID=\"" << c.in.persistentID << "\""
                                << " name=\"" << c.in.name << "\"";
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Hosts, HostConventionTest,
     ::testing::Values(
-        HostCase{
-            "REAPER_posix", {"/home/nate/audio/clip.wav", "clip.wav"}, "/home/nate/audio/clip.wav"},
+        HostCase{"REAPER_posix", {"/home/nate/audio/clip.wav", "clip.wav"}, "/home/nate/audio/clip.wav"},
         HostCase{"Cubase_guid_with_path_in_name",
                  {"{8F2B3C5D-1234-4B56-9E01-ABCDEF012345}", "/Users/nate/OneDrive/track.wav"},
                  "/Users/nate/OneDrive/track.wav"},
-        HostCase{"StudioOne_file_url",
-                 {"file:///Users/nate/music/loop.wav", "loop.wav"},
-                 "/Users/nate/music/loop.wav"},
-        HostCase{"Logic_double_slash_prefix",
-                 {"//Users/nate/Library/take.wav", "take"},
-                 "/Users/nate/Library/take.wav"},
-        HostCase{"Windows_drive_letter",
-                 {"C:/Users/nate/audio/clip.wav", "clip.wav"},
-                 "C:/Users/nate/audio/clip.wav"},
+        HostCase{"StudioOne_file_url", {"file:///Users/nate/music/loop.wav", "loop.wav"}, "/Users/nate/music/loop.wav"},
         HostCase{
-            "Windows_backslash_drive", {R"(D:\Music\song.wav)", "song"}, R"(D:\Music\song.wav)"},
+            "Logic_double_slash_prefix", {"//Users/nate/Library/take.wav", "take"}, "/Users/nate/Library/take.wav"},
+        HostCase{"Windows_drive_letter", {"C:/Users/nate/audio/clip.wav", "clip.wav"}, "C:/Users/nate/audio/clip.wav"},
+        HostCase{"Windows_backslash_drive", {R"(D:\Music\song.wav)", "song"}, R"(D:\Music\song.wav)"},
         HostCase{"Both_opaque_returns_empty", {"uuid:abc-123", "unnamed"}, ""}),
     [](const ::testing::TestParamInfo<HostCase>& info) { return std::string(info.param.label); });
 

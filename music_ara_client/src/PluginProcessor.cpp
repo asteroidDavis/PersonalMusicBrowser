@@ -54,12 +54,10 @@ public:
     using juce::ARADocumentControllerSpecialisation::ARADocumentControllerSpecialisation;
 
 protected:
-    bool doRestoreObjectsFromStream(juce::ARAInputStream&,
-                                    const ARA::PlugIn::RestoreObjectsFilter*) override {
+    bool doRestoreObjectsFromStream(juce::ARAInputStream&, const ARA::PlugIn::RestoreObjectsFilter*) override {
         return true;
     }
-    bool doStoreObjectsToStream(juce::ARAOutputStream&,
-                                const ARA::PlugIn::StoreObjectsFilter*) override {
+    bool doStoreObjectsToStream(juce::ARAOutputStream&, const ARA::PlugIn::StoreObjectsFilter*) override {
         return true;
     }
 };

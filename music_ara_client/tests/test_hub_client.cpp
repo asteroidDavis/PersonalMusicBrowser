@@ -101,18 +101,15 @@ TEST(BuildJsonBody, EscapesControlCharacters) {
 
     const auto json = buildJsonBody(req);
     // Raw JSON must NOT contain the unescaped control bytes.
-    EXPECT_EQ(json.find('\t'), std::string::npos)
-        << "raw tab present in JSON (should be \\t): " << json;
-    EXPECT_EQ(json.find('\n'), std::string::npos)
-        << "raw newline present in JSON (should be \\n): " << json;
+    EXPECT_EQ(json.find('\t'), std::string::npos) << "raw tab present in JSON (should be \\t): " << json;
+    EXPECT_EQ(json.find('\n'), std::string::npos) << "raw newline present in JSON (should be \\n): " << json;
 }
 
 TEST(OperationWire, RoundTripsAllVariants) {
     for (auto op : {Operation::GenerateSheetMusic, Operation::Repomix, Operation::Hitpoints}) {
         const std::string wire = operationWireName(op);
         Operation parsed{};
-        ASSERT_TRUE(parseOperation(wire, parsed))
-            << "failed to parse wire name '" << wire << "' back to Operation";
+        ASSERT_TRUE(parseOperation(wire, parsed)) << "failed to parse wire name '" << wire << "' back to Operation";
         EXPECT_EQ(static_cast<int>(parsed), static_cast<int>(op))
             << "wire name '" << wire << "' round-tripped to a different enum value";
     }
@@ -120,8 +117,7 @@ TEST(OperationWire, RoundTripsAllVariants) {
 
 TEST(OperationWire, RejectsUnknownStrings) {
     Operation parsed = Operation::Hitpoints;
-    EXPECT_FALSE(parseOperation("unknown_op", parsed))
-        << "parseOperation should reject unknown strings";
+    EXPECT_FALSE(parseOperation("unknown_op", parsed)) << "parseOperation should reject unknown strings";
     EXPECT_EQ(static_cast<int>(parsed), static_cast<int>(Operation::Hitpoints))
         << "out parameter must be left untouched on failure";
 }
@@ -139,8 +135,7 @@ TEST(SendRequest, RefusesEmptyPathWithoutCallingPoster) {
     const bool ok = sendRequest(req, "http://localhost:3000/api/workflows", poster, err);
     EXPECT_FALSE(ok) << "must refuse empty path";
     EXPECT_FALSE(posterCalled) << "poster must not be invoked for empty path";
-    EXPECT_NE(err.find("empty file path"), std::string::npos)
-        << "expected 'empty file path' in error, got: " << err;
+    EXPECT_NE(err.find("empty file path"), std::string::npos) << "expected 'empty file path' in error, got: " << err;
 }
 
 TEST(SendRequest, PassesBuiltBodyToPoster) {
@@ -156,11 +151,9 @@ TEST(SendRequest, PassesBuiltBodyToPoster) {
         return true;
     };
     std::string err;
-    EXPECT_TRUE(sendRequest(req, "http://localhost:3000/api/workflows", poster, err))
-        << "unexpected error: " << err;
+    EXPECT_TRUE(sendRequest(req, "http://localhost:3000/api/workflows", poster, err)) << "unexpected error: " << err;
     EXPECT_EQ(seenUrl, "http://localhost:3000/api/workflows");
-    EXPECT_EQ(seenBody, buildJsonBody(req))
-        << "sendRequest must pass the canonical body to the poster";
+    EXPECT_EQ(seenBody, buildJsonBody(req)) << "sendRequest must pass the canonical body to the poster";
 }
 
 TEST(SendRequest, SurfacesPosterError) {

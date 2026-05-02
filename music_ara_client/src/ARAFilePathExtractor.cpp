@@ -12,8 +12,8 @@ bool looksAbsolute(std::string_view candidate) {
         return true;
     }
     // Windows drive letter — `C:\foo` or `C:/foo`.
-    if (candidate.size() >= 3 && std::isalpha(static_cast<unsigned char>(candidate[0])) &&
-        candidate[1] == ':' && (candidate[2] == '\\' || candidate[2] == '/')) {
+    if (candidate.size() >= 3 && std::isalpha(static_cast<unsigned char>(candidate[0])) && candidate[1] == ':' &&
+        (candidate[2] == '\\' || candidate[2] == '/')) {
         return true;
     }
     return false;
@@ -21,12 +21,10 @@ bool looksAbsolute(std::string_view candidate) {
 
 std::string normalizeCandidate(std::string_view candidate) {
     constexpr std::string_view fileScheme = "file://";
-    if (candidate.size() >= fileScheme.size() &&
-        candidate.substr(0, fileScheme.size()) == fileScheme) {
+    if (candidate.size() >= fileScheme.size() && candidate.substr(0, fileScheme.size()) == fileScheme) {
         candidate.remove_prefix(fileScheme.size());
         // Optional third slash for `file:///` — collapse to a single leading `/`.
-        if (!candidate.empty() && candidate.front() == '/' && candidate.size() > 1 &&
-            candidate[1] == '/') {
+        if (!candidate.empty() && candidate.front() == '/' && candidate.size() > 1 && candidate[1] == '/') {
             candidate.remove_prefix(1);
         }
     }

@@ -49,13 +49,11 @@ std::string buildJsonBody(const HubRequest& request);
 /// Default hub endpoint — the Rust web app's local server.
 constexpr std::string_view kDefaultHubUrl = "http://localhost:3000/api/workflows";
 
-using HttpPoster =
-    std::function<bool(std::string_view url, const HubRequest& request, std::string& errorOut)>;
+using HttpPoster = std::function<bool(std::string_view url, const HubRequest& request, std::string& errorOut)>;
 
 /// Sends `request` to `url` via `post` and writes any transport error into
 /// `errorOut`.  Returns true iff the POST completed with a 2xx response
 /// (signalling is delegated to `post`).
-bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post,
-                 std::string& errorOut);
+bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post, std::string& errorOut);
 
 }  // namespace music_ara_client

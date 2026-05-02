@@ -86,8 +86,7 @@ std::string buildJsonBody(const HubRequest& request) {
     return out;
 }
 
-bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post,
-                 std::string& errorOut) {
+bool sendRequest(const HubRequest& request, std::string_view url, const HttpPoster& post, std::string& errorOut) {
     if (!post) {
         errorOut = "no HTTP poster configured";
         return false;

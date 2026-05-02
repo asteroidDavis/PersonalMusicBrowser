@@ -20,8 +20,7 @@
 
 namespace music_ara_client {
 
-class SendToHubProcessor final : public juce::AudioProcessor,
-                                 public juce::AudioProcessorARAExtension {
+class SendToHubProcessor final : public juce::AudioProcessor, public juce::AudioProcessorARAExtension {
 public:
     SendToHubProcessor();
     ~SendToHubProcessor() override = default;
@@ -30,9 +29,7 @@ public:
     const juce::String getName() const override { return "Send To Music Browser"; }
     void prepareToPlay(double, int) override {}
     void releaseResources() override {}
-    void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override {
-        buffer.clear();
-    }
+    void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.clear(); }
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
     bool acceptsMidi() const override { return false; }

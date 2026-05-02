@@ -1906,7 +1906,7 @@ pub async fn generate_schedule(
             // descending by weight so higher-priority songs appear first
             let len = weighted.len().max(1);
             weighted.rotate_left((block_offset as usize) % len);
-            weighted.sort_by(|a, b| b.1.cmp(&a.1));
+            weighted.sort_by_key(|b| std::cmp::Reverse(b.1));
             weighted.iter().map(|(s, _)| *s).take(capacity).collect()
         };
         for song in &songs_for_block {

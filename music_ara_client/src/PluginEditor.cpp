@@ -26,8 +26,8 @@ Operation operationFromComboId(int id) {
 HttpPoster makeJuceHttpPoster() {
     return [](std::string_view url, const HubRequest& request, std::string& errorOut) -> bool {
         auto u = juce::URL(juce::String(std::string(url)));
-        auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
-                           .withConnectionTimeoutMs(30000);
+        auto options =
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData).withConnectionTimeoutMs(30000);
 
         juce::URL postUrl = u;
 
@@ -37,11 +37,10 @@ HttpPoster makeJuceHttpPoster() {
                 errorOut = "Exported WAV missing: " + request.exportedWavPath;
                 return false;
             }
-            postUrl =
-                postUrl.withParameter("target_type", "file")
-                    .withParameter("target_id_or_path", juce::String(request.absoluteFilePath))
-                    .withParameter("operation", juce::String(operationWireName(request.operation)))
-                    .withFileToUpload("audio_file", audioFile, "audio/wav");
+            postUrl = postUrl.withParameter("target_type", "file")
+                          .withParameter("target_id_or_path", juce::String(request.absoluteFilePath))
+                          .withParameter("operation", juce::String(operationWireName(request.operation)))
+                          .withFileToUpload("audio_file", audioFile, "audio/wav");
         } else {
             postUrl = postUrl.withPOSTData(juce::String(buildJsonBody(request)));
         }
@@ -49,8 +48,7 @@ HttpPoster makeJuceHttpPoster() {
         int statusCode = 0;
         auto stream = postUrl.createInputStream(
             request.exportedWavPath.empty()
-                ? options.withExtraHeaders("Content-Type: application/json")
-                      .withStatusCode(&statusCode)
+                ? options.withExtraHeaders("Content-Type: application/json").withStatusCode(&statusCode)
                 : options.withStatusCode(&statusCode));
         if (stream == nullptr) {
             errorOut = "failed to open POST stream to " + std::string(url);
@@ -73,8 +71,7 @@ HttpPoster makeJuceHttpPoster() {
 
 }  // namespace
 
-SendToHubEditor::SendToHubEditor(SendToHubProcessor& p)
-    : juce::AudioProcessorEditor(&p), processor_(p) {
+SendToHubEditor::SendToHubEditor(SendToHubProcessor& p) : juce::AudioProcessorEditor(&p), processor_(p) {
     setSize(520, 180);
 
     selectedPathLabel_.setJustificationType(juce::Justification::centredLeft);
@@ -178,11 +175,9 @@ void SendToHubEditor::onSendClicked() {
         showStatus("selecting backup file...", juce::Colours::lightyellow);
         fileChooser_ = std::make_unique<juce::FileChooser>(
             "Cannot find audio file on disk. Please select the file manually:",
-            juce::File::getSpecialLocation(juce::File::userHomeDirectory),
-            "*.wav;*.aif;*.aiff;*.mp3;*.flac");
+            juce::File::getSpecialLocation(juce::File::userHomeDirectory), "*.wav;*.aif;*.aiff;*.mp3;*.flac");
 
-        auto chooserFlags =
-            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+        auto chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
         fileChooser_->launchAsync(chooserFlags, [this](const juce::FileChooser& fc) {
             auto result = fc.getResult();
             if (result.existsAsFile()) {
@@ -212,14 +207,12 @@ void SendToHubEditor::proceedWithFile(std::string path) {
     showStatus("copying audio...", juce::Colours::lightyellow);
 
     juce::Thread::launch([this, request, url, poster, path] {
-        auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                            .getChildFile("pmb_ara_export.wav");
+        auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("pmb_ara_export.wav");
         tempFile.deleteFile();
 
         juce::File originalFile{juce::String(path)};
         if (!originalFile.copyFileTo(tempFile)) {
-            juce::MessageManager::callAsync(
-                [this] { showStatus("failed to copy audio file", juce::Colours::red); });
+            juce::MessageManager::callAsync([this] { showStatus("failed to copy audio file", juce::Colours::red); });
             return;
         }
 
