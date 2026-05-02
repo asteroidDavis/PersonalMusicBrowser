@@ -31,8 +31,12 @@ class HostConventionTest : public ::testing::TestWithParam<HostCase> {};
 TEST_P(HostConventionTest, ResolvesExpectedPath) {
     const auto& c = GetParam();
     const auto got = extractAbsolutePath(c.in);
-    EXPECT_EQ(got, c.expected) << "host=" << c.label << " persistentID=\"" << c.in.persistentID << "\""
-                               << " name=\"" << c.in.name << "\"";
+    // clang-format off
+    EXPECT_EQ(got, c.expected)
+        << "host=" << c.label
+        << " persistentID=\"" << c.in.persistentID << "\""
+        << " name=\"" << c.in.name << "\"";
+    // clang-format on
 }
 
 INSTANTIATE_TEST_SUITE_P(
