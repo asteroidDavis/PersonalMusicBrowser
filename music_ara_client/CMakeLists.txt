@@ -95,6 +95,8 @@ if(MUSIC_ARA_BUILD_PLUGIN)
 
     juce_set_ara_sdk_path("${ARA_SDK_DIR}")
 
+    find_package(CURL REQUIRED)
+
     juce_add_plugin(SendToHubPlugin
         COMPANY_NAME           "PersonalMusicBrowser"
         PLUGIN_MANUFACTURER_CODE PmbR
@@ -124,5 +126,6 @@ if(MUSIC_ARA_BUILD_PLUGIN)
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+        CURL::libcurl
     )
 endif()
