@@ -109,12 +109,16 @@ if [[ ! -f "$REAPER_INI_DIR/reaper.ini" ]]; then
     cat > "$REAPER_INI_DIR/reaper.ini" <<EOF
 [REAPER]
 vstpath=$USER_VST3_DIR
+saveprompt=0
 EOF
 else
     # if it exists, try to make sure it includes the directory
     if ! grep -q "vstpath" "$REAPER_INI_DIR/reaper.ini"; then
         echo "vstpath=$USER_VST3_DIR" >> "$REAPER_INI_DIR/reaper.ini"
     fi
+    # and turn off the save prompt so it doesn't hang on quit
+    sed -i.bak '/^saveprompt=/d' "$REAPER_INI_DIR/reaper.ini"
+    echo "saveprompt=0" >> "$REAPER_INI_DIR/reaper.ini"
 fi
 
 # ---------------------------------------------------------------------------
@@ -150,7 +154,7 @@ file:write(string.format(
     tostring(ok), wav_path, ara_fx))
 file:close()
 
-reaper.Main_OnCommand(40004, 0) -- File: quit REAPER without save prompt
+reaper.Main_OnCommand(40004, 0) -- File: quit REAPER
 EOF
 
 # ---------------------------------------------------------------------------
