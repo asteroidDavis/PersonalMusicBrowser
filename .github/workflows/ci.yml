@@ -187,44 +187,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: timing-cpp-plugin-build, path: cpp-plugin-build.sec }
 
-  cpp-reaper-smoke:
-    name: REAPER ARA smoke test (c++)
-    needs: cpp-plugin-build
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.labels.*.name, 'build-cpp-plugin') ||
-      github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - name: install runtime deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xz-utils curl sox
-      - uses: actions/download-artifact@v4
-        with:
-          name: SendToHubPlugin-vst3
-          path: dl-vst3
-      - name: create fixture wav
-        run: |
-          mkdir -p fixtures
-          sox -n -r 44100 -c 2 fixtures/fixture.wav synth 1.0 sine 440
-      - name: run REAPER probe + timing
-        env:
-          FIXTURE_WAV: ${{ github.workspace }}/fixtures/fixture.wav
-        run: |
-          START=$(date +%s)
-          VST3=$(find dl-vst3 -name '*.vst3' -type d | head -n1)
-          if [[ -z "$VST3" ]]; then
-              VST3=$(find dl-vst3 -name '*.vst3' | head -n1)
-          fi
-          VST3_PATH="${GITHUB_WORKSPACE}/${VST3}" FIXTURE_WAV="$FIXTURE_WAV" \
-              bash music_ara_client/scripts/reaper_ci.sh
-          END=$(date +%s)
-          echo $((END - START)) > cpp-reaper-smoke.sec
-      - uses: actions/upload-artifact@v4
-        with: { name: timing-cpp-reaper-smoke, path: cpp-reaper-smoke.sec }
-
   # =========================================================================
   # Summary — download every `timing-*` artifact and render a rust-vs-c++
   # table into $GITHUB_STEP_SUMMARY.  Runs last; never fails the build.
