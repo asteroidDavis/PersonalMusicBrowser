@@ -114,6 +114,10 @@ cargo run --bin music-browser
 | `DATABASE_URL` | `sqlite:music_browser.db` | SQLite connection string |
 | `BIND_ADDR` | `127.0.0.1:3000` | Address to bind the server |
 | `RUST_LOG` | `info` | Log level (trace, debug, info, warn, error) |
+| `JOB_STORE_CAP` | `10` | Max job records retained in memory before eviction |
+| `JOB_STORE_TTL_SECS` | `7200` | TTL (seconds) for job records before eviction |
+| `HYDRATION_TIMEOUT_SECS` | `30` | Wait time (seconds) for cloud placeholder hydration before fallback copy |
+| `HYDRATION_COPY_MAX_BYTES` | `1073741824` | Max bytes allowed for temp copy fallback (0 disables limit) |
 
 ## Database
 

@@ -10,18 +10,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # =========================================================================
+  # Rust side — music_browser/
+  # Each job writes its wall-clock duration in seconds to `rust-<name>.sec`
+  # and uploads it as an artifact so the `summary` job can tally rust-vs-c++.
+  # =========================================================================
   fmt:
-    name: Format
+    name: Format (rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --manifest-path music_browser/Cargo.toml -- --check
+      - name: fmt + timing
+        run: |
+          START=$(date +%s)
+          cargo fmt --manifest-path music_browser/Cargo.toml -- --check
+          END=$(date +%s)
+          echo $((END - START)) > rust-fmt.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-rust-fmt, path: rust-fmt.sec }
 
   clippy:
-    name: Clippy
+    name: Clippy (rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +47,17 @@ jobs:
             ~/.cargo/git
             music_browser/target
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('music_browser/Cargo.lock') }}
-      - run: cargo clippy --manifest-path music_browser/Cargo.toml -- -D warnings
+      - name: clippy + timing
+        run: |
+          START=$(date +%s)
+          cargo clippy --manifest-path music_browser/Cargo.toml -- -D warnings
+          END=$(date +%s)
+          echo $((END - START)) > rust-clippy.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-rust-clippy, path: rust-clippy.sec }
 
   test:
-    name: Test (${{ matrix.rust }})
+    name: Test rust (${{ matrix.rust }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -55,14 +74,162 @@ jobs:
             ~/.cargo/git
             music_browser/target
           key: ${{ runner.os }}-cargo-test-${{ matrix.rust }}-${{ hashFiles('music_browser/Cargo.lock') }}
-      - run: cargo test --manifest-path music_browser/Cargo.toml
+      - name: cargo test + timing
+        run: |
+          START=$(date +%s)
+          cargo test --manifest-path music_browser/Cargo.toml
+          END=$(date +%s)
+          echo $((END - START)) > rust-test-${{ matrix.rust }}.sec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timing-rust-test-${{ matrix.rust }}
+          path: rust-test-${{ matrix.rust }}.sec
 
   security:
-    name: Security Audit
+    name: Security Audit (rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit --locked
-      - run: cd music_browser && cargo generate-lockfile
-      - run: cargo audit --file music_browser/Cargo.lock --ignore RUSTSEC-2023-0071
+      - name: audit + timing
+        run: |
+          START=$(date +%s)
+          cargo install cargo-audit --locked
+          cd music_browser && cargo generate-lockfile && cd ..
+          cargo audit --file music_browser/Cargo.lock --ignore RUSTSEC-2023-0071
+          END=$(date +%s)
+          echo $((END - START)) > rust-security.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-rust-security, path: rust-security.sec }
+
+  # =========================================================================
+  # C++ side — music_ara_client/
+  # =========================================================================
+  cpp-format:
+    name: Format (c++)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: clang-format --dry-run + timing
+        run: |
+          START=$(date +%s)
+          mapfile -t files < <(find music_ara_client/src music_ara_client/tests \
+              \( -name '*.cpp' -o -name '*.h' \))
+          clang-format --style=file --dry-run --Werror "${files[@]}"
+          END=$(date +%s)
+          echo $((END - START)) > cpp-format.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-cpp-format, path: cpp-format.sec }
+
+  cpp-core-tests:
+    name: Unit tests (c++ core, host-free)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
+      - uses: actions/cache@v4
+        with:
+          path: music_ara_client/build
+          key: ${{ runner.os }}-music-ara-core-${{ hashFiles('music_ara_client/CMakeLists.txt', 'music_ara_client/src/**', 'music_ara_client/tests/**') }}
+      - name: configure + build + test + timing
+        run: |
+          START=$(date +%s)
+          cmake -S music_ara_client -B music_ara_client/build -G Ninja \
+                -DMUSIC_ARA_BUILD_PLUGIN=OFF -DMUSIC_ARA_BUILD_TESTS=ON
+          cmake --build music_ara_client/build --target sendtohub_core_tests -j
+          ctest --test-dir music_ara_client/build --output-on-failure
+          END=$(date +%s)
+          echo $((END - START)) > cpp-core-tests.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-cpp-core-tests, path: cpp-core-tests.sec }
+
+  cpp-plugin-build:
+    name: Build JUCE ARA plugin (c++)
+    runs-on: ubuntu-latest
+    # The full JUCE + ARA build is slow; keep it opt-in via PR label or manual
+    # dispatch so casual PRs aren't blocked on a 10-minute compile.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'build-cpp-plugin') ||
+      github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: install toolchain + JUCE deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ pkg-config \
+            libasound2-dev libjack-jackd2-dev libcurl4-openssl-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev \
+            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev \
+            libxrender-dev libwebkit2gtk-4.1-dev
+      - uses: actions/cache@v4
+        with:
+          path: |
+            music_ara_client/build-plugin/_deps
+            music_ara_client/build-plugin/SendToHubPlugin_artefacts
+          key: ${{ runner.os }}-music-ara-plugin-${{ hashFiles('music_ara_client/CMakeLists.txt') }}
+      - name: configure + build + timing
+        run: |
+          START=$(date +%s)
+          cmake -S music_ara_client -B music_ara_client/build-plugin -G Ninja \
+                -DMUSIC_ARA_BUILD_PLUGIN=ON -DMUSIC_ARA_BUILD_TESTS=OFF \
+                -DCMAKE_BUILD_TYPE=Release
+          cmake --build music_ara_client/build-plugin --target SendToHubPlugin_VST3 -j
+          END=$(date +%s)
+          echo $((END - START)) > cpp-plugin-build.sec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SendToHubPlugin-vst3
+          path: music_ara_client/build-plugin/SendToHubPlugin_artefacts/**/VST3/**
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-cpp-plugin-build, path: cpp-plugin-build.sec }
+
+  # =========================================================================
+  # Summary — download every `timing-*` artifact and render a rust-vs-c++
+  # table into $GITHUB_STEP_SUMMARY.  Runs last; never fails the build.
+  # =========================================================================
+  summary:
+    name: CI timing summary (rust vs c++)
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test, security, cpp-format, cpp-core-tests]
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: timings
+          pattern: timing-*
+          merge-multiple: true
+      - name: render summary
+        run: |
+          rust_total=0
+          cpp_total=0
+          {
+            echo "# CI timing: Rust vs C++"
+            echo
+            echo "| Side | Job | Seconds |"
+            echo "|------|-----|---------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          shopt -s nullglob
+          for f in timings/*.sec timings/**/*.sec; do
+              [[ -f "$f" ]] || continue
+              secs=$(tr -dc '0-9' < "$f")
+              [[ -z "$secs" ]] && continue
+              name=$(basename "$f" .sec)
+              if [[ "$name" == rust-* ]]; then
+                  side="Rust"
+                  rust_total=$((rust_total + secs))
+              else
+                  side="C++"
+                  cpp_total=$((cpp_total + secs))
+              fi
+              echo "| $side | $name | ${secs}s |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo
+            echo "| **Total Rust** | | **${rust_total}s** |"
+            echo "| **Total C++**  | | **${cpp_total}s** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "rust_total=${rust_total}s cpp_total=${cpp_total}s"

@@ -7,3 +7,7 @@ target/
 *settings.py
 
 *__pycache__*
+
+# music_ara_client (JUCE ARA plugin, Phase 4)
+music_ara_client/build/
+music_ara_client/build-*/

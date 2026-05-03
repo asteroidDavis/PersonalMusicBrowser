@@ -7,6 +7,9 @@ use sqlx::SqlitePool;
 
 use music_browser::db::models::*;
 use music_browser::db::queries;
+use music_browser::jobs::{
+    check_hydration, JobQueue, JobRecord, JobStatus, JobStore, Operation, TargetType, WorkflowJob,
+};
 
 /// Extract the `Referer` header from a request, falling back to `default`.
 fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
@@ -167,6 +170,57 @@ struct BandsTemplate {
 #[template(path = "band_form.html")]
 struct BandFormTemplate {
     name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Jobs view structs
+// ---------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "jobs.html")]
+struct JobsTemplate {
+    jobs: Vec<JobRowView>,
+}
+
+struct JobRowView {
+    id: u64,
+    status: String,
+    status_label: String,
+    operation: String,
+    target_type: String,
+    target: String,
+    log_count: usize,
+    resolved_paths: Vec<String>,
+    output_dir: String,
+}
+
+#[derive(Template)]
+#[template(path = "job_detail.html")]
+struct JobDetailTemplate {
+    row: JobRowView,
+    log_lines: Vec<String>,
+    /// Pre-filled JSON for the re-run form.
+    prefill_json: String,
+}
+
+fn job_to_row(r: &JobRecord) -> JobRowView {
+    let (status, status_label) = match r.status {
+        JobStatus::Queued => ("queued", "⏳ Queued"),
+        JobStatus::Running => ("running", "⚙️ Running"),
+        JobStatus::Done => ("done", "✅ Done"),
+        JobStatus::Failed => ("failed", "❌ Failed"),
+    };
+    JobRowView {
+        id: r.job.id,
+        status: status.to_string(),
+        status_label: status_label.to_string(),
+        operation: r.job.operation.as_str().to_string(),
+        target_type: format!("{:?}", r.job.target_type).to_lowercase(),
+        target: r.job.target_id_or_path.clone(),
+        log_count: r.log_lines.len(),
+        resolved_paths: r.job.resolved_paths.clone(),
+        output_dir: r.job.output_dir.clone().unwrap_or_default(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1810,8 +1864,243 @@ async fn practice_priority_update(
 }
 
 // ---------------------------------------------------------------------------
-// App configuration (shared between main and tests)
+// Handlers — Job monitor
 // ---------------------------------------------------------------------------
+
+async fn jobs_list(store: web::Data<JobStore>) -> actix_web::Result<HttpResponse> {
+    let jobs: Vec<JobRowView> = store.list().iter().map(job_to_row).collect();
+    let tmpl = JobsTemplate { jobs };
+    let body = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+async fn job_detail(
+    store: web::Data<JobStore>,
+    path: web::Path<u64>,
+) -> actix_web::Result<HttpResponse> {
+    let id = path.into_inner();
+    let record = store
+        .get(id)
+        .ok_or_else(|| actix_web::error::ErrorNotFound("job not found"))?;
+    let prefill_json = serde_json::to_string_pretty(&serde_json::json!({
+        "target_type": format!("{:?}", record.job.target_type).to_lowercase(),
+        "target_id_or_path": record.job.target_id_or_path,
+        "operation": record.job.operation.as_str(),
+    }))
+    .unwrap_or_default();
+    let tmpl = JobDetailTemplate {
+        log_lines: record.log_lines.clone(),
+        prefill_json,
+        row: job_to_row(&record),
+    };
+    let body = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+// ---------------------------------------------------------------------------
+// Handlers — Workflow jobs API
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct WorkflowRequest {
+    target_type: String,
+    target_id_or_path: String,
+    operation: String,
+}
+
+async fn workflows_enqueue(
+    pool: web::Data<SqlitePool>,
+    queue: web::Data<JobQueue>,
+    body: web::Json<WorkflowRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let target_type = match body.target_type.as_str() {
+        "song" => TargetType::Song,
+        "live_set" => TargetType::LiveSet,
+        "file" => TargetType::File,
+        "directory" => TargetType::Directory,
+        other => {
+            return Err(actix_web::error::ErrorBadRequest(format!(
+                "unknown target_type: {other}"
+            )))
+        }
+    };
+
+    let operation = Operation::parse(&body.operation).ok_or_else(|| {
+        actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
+    })?;
+
+    let (resolved_paths, output_dir) =
+        resolve_paths(&pool, &target_type, &operation, &body.target_id_or_path).await?;
+
+    let job = WorkflowJob {
+        id: 0,
+        target_type,
+        target_id_or_path: body.target_id_or_path.clone(),
+        operation,
+        resolved_paths,
+        output_dir,
+    };
+
+    let job_id = queue
+        .enqueue(job)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "ok": true,
+        "job_id": job_id
+    })))
+}
+
+/// Resolve a target to a list of subprocess input paths and an optional
+/// `--output-dir` for the `music-operations` CLI.
+///
+/// The semantics are operation-aware:
+///
+/// | Target           | Operation            | Inputs                                      | Output dir           |
+/// |------------------|----------------------|---------------------------------------------|----------------------|
+/// | `Song`           | GenerateSheetMusic   | every `.wav` found under `export_folder`    | `scores_folder`      |
+/// | `Song`           | Repomix              | `practice_project_path` (fallback: export)  | `export_folder`      |
+/// | `Song`           | Hitpoints            | `export_folder`                             | `export_folder`      |
+/// | `LiveSet`        | *                    | live-set name (opaque, handled by CLI)      | `None`               |
+/// | `File`/`Directory` | *                  | the path itself (after hydration check)     | `None` (uses parent) |
+async fn resolve_paths(
+    pool: &SqlitePool,
+    target_type: &TargetType,
+    operation: &Operation,
+    target_id_or_path: &str,
+) -> actix_web::Result<(Vec<String>, Option<String>)> {
+    match target_type {
+        TargetType::Song => {
+            let id: i64 = target_id_or_path
+                .parse()
+                .map_err(|_| actix_web::error::ErrorBadRequest("song id must be numeric"))?;
+            let song = queries::get_song(pool, id)
+                .await
+                .map_err(actix_web::error::ErrorInternalServerError)?
+                .ok_or_else(|| actix_web::error::ErrorNotFound("song not found"))?;
+
+            resolve_song_paths(&song, operation)
+        }
+        TargetType::LiveSet => {
+            let id: i64 = target_id_or_path
+                .parse()
+                .map_err(|_| actix_web::error::ErrorBadRequest("live_set id must be numeric"))?;
+            let set = queries::get_live_set(pool, id)
+                .await
+                .map_err(actix_web::error::ErrorInternalServerError)?
+                .ok_or_else(|| actix_web::error::ErrorNotFound("live_set not found"))?;
+            Ok((vec![set.name.clone()], None))
+        }
+        TargetType::File | TargetType::Directory => {
+            let path = std::path::Path::new(target_id_or_path);
+            match check_hydration(path) {
+                music_browser::jobs::HydrationStatus::NotFound => {
+                    Err(actix_web::error::ErrorUnprocessableEntity(format!(
+                        "path not found on disk: {target_id_or_path}"
+                    )))
+                }
+                music_browser::jobs::HydrationStatus::Placeholder => {
+                    Err(actix_web::error::ErrorUnprocessableEntity(format!(
+                        "file is a cloud placeholder (not hydrated): {target_id_or_path}"
+                    )))
+                }
+                music_browser::jobs::HydrationStatus::Hydrated => {
+                    Ok((vec![target_id_or_path.to_string()], None))
+                }
+            }
+        }
+    }
+}
+
+/// Operation-aware resolution for `Song` targets.
+fn resolve_song_paths(
+    song: &music_browser::db::models::Song,
+    operation: &Operation,
+) -> actix_web::Result<(Vec<String>, Option<String>)> {
+    let non_empty = |s: &str| {
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
+    };
+
+    match operation {
+        Operation::GenerateSheetMusic => {
+            // AnthemScore needs a .wav file.  Scan the configured export
+            // folder for audio; if it is itself a file, use it directly.
+            let export = non_empty(&song.export_folder).ok_or_else(|| {
+                actix_web::error::ErrorUnprocessableEntity(
+                    "song has no export_folder configured — required for generate_sheet_music",
+                )
+            })?;
+            let inputs = find_wav_inputs(&export)?;
+            if inputs.is_empty() {
+                return Err(actix_web::error::ErrorUnprocessableEntity(format!(
+                    "no .wav files found at or under {export}"
+                )));
+            }
+            let output = non_empty(&song.scores_folder).unwrap_or(export);
+            Ok((inputs, Some(output)))
+        }
+        Operation::Repomix => {
+            let input = non_empty(&song.practice_project_path)
+                .or_else(|| non_empty(&song.export_folder))
+                .ok_or_else(|| {
+                    actix_web::error::ErrorUnprocessableEntity(
+                        "song has no practice_project_path or export_folder to pack",
+                    )
+                })?;
+            let output = non_empty(&song.export_folder).unwrap_or_else(|| input.clone());
+            Ok((vec![input], Some(output)))
+        }
+        Operation::Hitpoints => {
+            let input = non_empty(&song.export_folder).ok_or_else(|| {
+                actix_web::error::ErrorUnprocessableEntity(
+                    "song has no export_folder configured — required for hitpoints",
+                )
+            })?;
+            let output = input.clone();
+            Ok((vec![input], Some(output)))
+        }
+    }
+}
+
+/// Return `[path]` when `root` is an existing `.wav` file, or all `.wav`
+/// files directly inside `root` when it is a directory.  Does not recurse.
+fn find_wav_inputs(root: &str) -> actix_web::Result<Vec<String>> {
+    let p = std::path::Path::new(root);
+    let meta = std::fs::metadata(p).map_err(|e| {
+        actix_web::error::ErrorUnprocessableEntity(format!("cannot stat {root}: {e}"))
+    })?;
+    if meta.is_file() {
+        return Ok(vec![root.to_string()]);
+    }
+    let read = std::fs::read_dir(p).map_err(|e| {
+        actix_web::error::ErrorUnprocessableEntity(format!("cannot read {root}: {e}"))
+    })?;
+    let mut out: Vec<String> = Vec::new();
+    for entry in read.flatten() {
+        let path = entry.path();
+        let is_wav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            .unwrap_or(false);
+        if is_wav && path.is_file() {
+            if let Some(s) = path.to_str() {
+                out.push(s.to_string());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
 
 pub fn configure_app(cfg: &mut web::ServiceConfig) {
     cfg
@@ -1945,7 +2234,27 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
         .route(
             "/practice/songs/{id}/priority",
             web::post().to(practice_priority_update),
-        );
+        )
+        // Workflow jobs API
+        .service(
+            web::resource("/api/workflows")
+                .route(
+                    web::post()
+                        .guard(actix_web::guard::fn_guard(|req| {
+                            req.head()
+                                .headers
+                                .get("content-type")
+                                .and_then(|h| h.to_str().ok())
+                                .map(|s| s.starts_with("multipart/form-data"))
+                                .unwrap_or(false)
+                        }))
+                        .to(workflows_enqueue_upload),
+                )
+                .route(web::post().to(workflows_enqueue)),
+        )
+        // Job monitor UI
+        .route("/jobs", web::get().to(jobs_list))
+        .route("/jobs/{id}", web::get().to(job_detail));
 }
 
 // ---------------------------------------------------------------------------
@@ -1967,14 +2276,98 @@ async fn main() -> std::io::Result<()> {
     let pool_data = web::Data::new(pool);
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
 
+    let (job_queue, job_receiver) = JobQueue::new(256);
+    let job_store = job_queue.store.clone();
+    tokio::spawn(music_browser::jobs::run_worker(
+        job_receiver,
+        job_store.clone(),
+    ));
+    let queue_data = web::Data::new(job_queue);
+    let store_data = web::Data::new(job_store);
+
     log::info!("Listening on http://{bind}");
 
     HttpServer::new(move || {
         App::new()
             .app_data(pool_data.clone())
+            .app_data(queue_data.clone())
+            .app_data(store_data.clone())
             .configure(configure_app)
     })
     .bind(&bind)?
     .run()
     .await
+}
+
+use actix_multipart::form::MultipartForm;
+
+#[derive(actix_multipart::form::MultipartForm)]
+struct WorkflowUploadForm {
+    #[multipart(rename = "target_type")]
+    target_type: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "target_id_or_path")]
+    target_id_or_path: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "operation")]
+    operation: actix_multipart::form::text::Text<String>,
+    #[multipart(rename = "audio_file")]
+    audio_file: Option<actix_multipart::form::tempfile::TempFile>,
+}
+
+async fn workflows_enqueue_upload(
+    pool: web::Data<sqlx::SqlitePool>,
+    queue: web::Data<JobQueue>,
+    MultipartForm(form): MultipartForm<WorkflowUploadForm>,
+) -> actix_web::Result<HttpResponse> {
+    let target_type_str = form.target_type.into_inner();
+    let target_type = match target_type_str.as_str() {
+        "song" => TargetType::Song,
+        "live_set" => TargetType::LiveSet,
+        "file" => TargetType::File,
+        "directory" => TargetType::Directory,
+        other => {
+            return Err(actix_web::error::ErrorBadRequest(format!(
+                "unknown target_type: {other}"
+            )))
+        }
+    };
+
+    let op_str = form.operation.into_inner();
+    let operation = Operation::parse(&op_str).ok_or_else(|| {
+        actix_web::error::ErrorBadRequest(format!("unknown operation: {}", op_str))
+    })?;
+
+    let mut target_id_or_path = form.target_id_or_path.into_inner();
+
+    if let Some(file) = form.audio_file {
+        let temp_dir = std::env::temp_dir().join("pmb_uploads");
+        std::fs::create_dir_all(&temp_dir)?;
+        let file_name = file.file_name.unwrap_or_else(|| "upload.wav".to_string());
+        let dest = temp_dir.join(format!("{}_{}", uuid::Uuid::new_v4(), file_name));
+        file.file
+            .persist(&dest)
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        target_id_or_path = dest.to_string_lossy().to_string();
+    }
+
+    let (resolved_paths, output_dir) =
+        resolve_paths(&pool, &target_type, &operation, &target_id_or_path).await?;
+
+    let job = WorkflowJob {
+        id: 0,
+        target_type,
+        target_id_or_path,
+        operation,
+        resolved_paths,
+        output_dir,
+    };
+
+    let job_id = queue
+        .enqueue(job)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "ok": true,
+        "job_id": job_id
+    })))
 }

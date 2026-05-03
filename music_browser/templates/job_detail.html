@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Job #{{ row.id }} — Personal Music Browser{% endblock %}
+
+{% block content %}
+<style>
+    .job-detail-header h2 { color:#a78bfa; display:flex; align-items:center; gap:.75rem; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem; }
+    @media(max-width:640px){ .detail-grid { grid-template-columns:1fr; } }
+    .detail-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem; }
+    .detail-card h3 { font-size:.85rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:.75rem; }
+    .detail-row { display:flex; justify-content:space-between; align-items:flex-start; gap:.5rem; padding:.35rem 0; border-bottom:1px solid var(--border); font-size:.9rem; }
+    .detail-row:last-child { border-bottom:none; }
+    .detail-label { color:var(--text-muted); font-size:.85rem; white-space:nowrap; }
+    .detail-value { color:var(--text); font-family:monospace; font-size:.85rem; text-align:right; word-break:break-all; }
+    .status-badge { display:inline-block; padding:.2rem .55rem; border-radius:3px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+    .status-queued  { background:rgba(251,191,36,.15); color:#fbbf24; border:1px solid #fbbf2440; }
+    .status-running { background:rgba(96,165,250,.15); color:#60a5fa; border:1px solid #60a5fa40; }
+    .status-done    { background:rgba(52,211,153,.15); color:#34d399; border:1px solid #34d39940; }
+    .status-failed  { background:rgba(248,113,113,.15); color:#f87171; border:1px solid #f8717140; }
+    .op-badge { background:rgba(167,139,250,.12); color:#a78bfa; padding:.15rem .45rem; border-radius:3px; font-size:.78rem; font-weight:600; }
+    .paths-list { list-style:none; }
+    .paths-list li { font-family:monospace; font-size:.8rem; color:var(--text-muted); padding:.2rem 0; border-bottom:1px solid var(--border); }
+    .paths-list li:last-child { border-bottom:none; }
+    .log-panel { background:#0d0d1a; border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.25rem; }
+    .log-panel h3 { font-size:.85rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:.75rem; }
+    .log-empty { color:var(--text-muted); font-size:.9rem; font-style:italic; }
+    .log-line { font-family:"SFMono-Regular",Consolas,monospace; font-size:.8rem; line-height:1.6; color:#c4c4d4; padding:.15rem 0; border-bottom:1px solid rgba(255,255,255,.03); white-space:pre-wrap; word-break:break-all; }
+    .log-line:last-child { border-bottom:none; }
+    .rerun-panel { background:var(--surface); border:1px solid #a78bfa33; border-radius:var(--radius); padding:1.25rem; margin-top:1.25rem; }
+    .rerun-panel h3 { color:#a78bfa; font-size:.9rem; margin-bottom:.75rem; }
+    .rerun-json { width:100%; min-height:120px; background:#0d0d1a; border:1px solid var(--border); border-radius:var(--radius); color:#c4c4d4; font-family:monospace; font-size:.85rem; padding:.6rem .8rem; resize:vertical; }
+    .rerun-json:focus { outline:none; border-color:#a78bfa; }
+    #rerun-result { margin-top:.6rem; font-size:.85rem; color:var(--text-muted); min-height:1.4em; }
+</style>
+
+<div class="page-header job-detail-header">
+    <h2>
+        🔧 Job <span style="color:#a78bfa">#{{ row.id }}</span>
+        <span class="status-badge status-{{ row.status }}">{{ row.status_label }}</span>
+    </h2>
+    <a href="/jobs" class="btn btn-sm">← All jobs</a>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-card">
+        <h3>Details</h3>
+        <div class="detail-row">
+            <span class="detail-label">Operation</span>
+            <span class="op-badge">{{ row.operation }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Target type</span>
+            <span class="detail-value">{{ row.target_type }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Target</span>
+            <span class="detail-value">{{ row.target }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Log lines</span>
+            <span class="detail-value">{{ row.log_count }}</span>
+        </div>
+        {% if !row.output_dir.is_empty() %}
+        <div class="detail-row">
+            <span class="detail-label">Output dir</span>
+            <span class="detail-value"><code>{{ row.output_dir }}</code></span>
+        </div>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <h3>Resolved paths</h3>
+        {% if row.resolved_paths.is_empty() %}
+        <p class="log-empty">No paths resolved.</p>
+        {% else %}
+        <ul class="paths-list">
+            {% for p in row.resolved_paths %}<li>{{ p }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</div>
+
+<div class="log-panel">
+    <h3>Log output ({{ row.log_count }} line(s))</h3>
+    {% if log_lines.is_empty() %}
+    <p class="log-empty">No log output yet.</p>
+    {% else %}
+    {% for line in log_lines %}
+    <div class="log-line">{{ line }}</div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+<div class="rerun-panel">
+    <h3>Re-run / iterate</h3>
+    <p class="text-muted" style="margin-bottom:.6rem;font-size:.82rem;">Edit the JSON and click Enqueue to submit a new job with modified parameters.</p>
+    <script type="application/json" id="prefill-data">{{ prefill_json }}</script>
+    <textarea class="rerun-json" id="rerun-body"></textarea>
+    <div style="display:flex;gap:.6rem;margin-top:.6rem;align-items:center">
+        <button class="btn btn-primary" onclick="rerun()">Enqueue</button>
+        <button class="btn btn-sm" onclick="resetJson()">Reset</button>
+    </div>
+    <div id="rerun-result"></div>
+</div>
+
+<script>
+const originalJson = JSON.parse(document.getElementById('prefill-data').textContent);
+document.getElementById('rerun-body').value = JSON.stringify(originalJson, null, 2);
+
+function resetJson() {
+    document.getElementById('rerun-body').value = JSON.stringify(originalJson, null, 2);
+}
+
+async function rerun() {
+    const el = document.getElementById('rerun-result');
+    let payload;
+    try {
+        payload = JSON.parse(document.getElementById('rerun-body').value);
+    } catch (e) {
+        el.textContent = `❌ Invalid JSON: ${e.message}`;
+        return;
+    }
+    try {
+        const r = await fetch('/api/workflows', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) {
+            el.innerHTML = `✅ Accepted — job <strong>#${data.job_id}</strong>. <a href="/jobs/${data.job_id}">View →</a>`;
+        } else {
+            el.textContent = `❌ ${r.status}: ${data.message ?? JSON.stringify(data)}`;
+        }
+    } catch (e) {
+        el.textContent = `❌ Network error: ${e}`;
+    }
+}
+</script>
+{% endblock %}
