@@ -158,9 +158,10 @@ EOF
 # ---------------------------------------------------------------------------
 echo "::group::Run REAPER ARA probe"
 if command -v xvfb-run >/dev/null 2>&1; then
-    xvfb-run -a "$REAPER_BIN" -nosplash -noactivate -nonewinst "$PROBE_LUA" || true
+    # Piping 'y' to bypass the REAPER EULA prompt that can hang headless executions on first run
+    echo "y" | xvfb-run -a "$REAPER_BIN" -nosplash -noactivate -nonewinst "$PROBE_LUA" || true
 else
-    "$REAPER_BIN" -nosplash -noactivate -nonewinst "$PROBE_LUA" || true
+    echo "y" | "$REAPER_BIN" -nosplash -noactivate -nonewinst "$PROBE_LUA" || true
 fi
 echo "::endgroup::"
 
