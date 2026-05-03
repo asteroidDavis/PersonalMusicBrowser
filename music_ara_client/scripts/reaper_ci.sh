@@ -38,16 +38,19 @@ cd "$WORK_DIR"
 # 1. Ensure REAPER is installed or skip.
 # ---------------------------------------------------------------------------
 if [[ "$OS" == "Darwin" ]]; then
-    # We allow the macOS DMG to be downloaded and extracted because it's non-interactive,
-    # but per user request we can also just check if the app exists. 
-    # Let's keep the DMG download but only run it if REAPER.app doesn't exist.
     if [[ ! -d "$WORK_DIR/REAPER.app" ]]; then
-        echo "::group::Install REAPER $REAPER_VERSION"
-        curl -fL "$REAPER_URL" -o reaper.dmg
-        hdiutil attach reaper.dmg -mountpoint "$WORK_DIR/mnt_reaper" -quiet -nobrowse
-        cp -R "$WORK_DIR/mnt_reaper/REAPER.app" "$WORK_DIR/"
-        hdiutil detach "$WORK_DIR/mnt_reaper" -quiet
-        echo "::endgroup::"
+        if [[ "${CI:-}" == "true" ]]; then
+            echo "::group::Install REAPER $REAPER_VERSION (CI)"
+            curl -fL "$REAPER_URL" -o reaper.dmg
+            hdiutil attach reaper.dmg -mountpoint "$WORK_DIR/mnt_reaper" -quiet -nobrowse
+            cp -R "$WORK_DIR/mnt_reaper/REAPER.app" "$WORK_DIR/"
+            hdiutil detach "$WORK_DIR/mnt_reaper" -quiet
+            echo "::endgroup::"
+        else
+            echo "SKIPPED: REAPER is not installed at $WORK_DIR/REAPER.app"
+            echo "Please install REAPER manually or run in CI to test."
+            exit 0
+        fi
     fi
     REAPER_BIN="$WORK_DIR/REAPER.app/Contents/MacOS/REAPER"
 else
