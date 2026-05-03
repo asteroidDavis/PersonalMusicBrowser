@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 // ============================================================================
@@ -25,6 +26,77 @@ pub enum Operation {
     GenerateSheetMusic,
     Repomix,
     Hitpoints,
+}
+
+// ============================================================================
+// Configuration (env-overridable)
+// ============================================================================
+
+const JOB_STORE_CAP_ENV: &str = "JOB_STORE_CAP";
+const JOB_STORE_TTL_SECS_ENV: &str = "JOB_STORE_TTL_SECS";
+const HYDRATION_TIMEOUT_SECS_ENV: &str = "HYDRATION_TIMEOUT_SECS";
+const HYDRATION_COPY_MAX_BYTES_ENV: &str = "HYDRATION_COPY_MAX_BYTES";
+
+const DEFAULT_JOB_STORE_CAP: usize = 10;
+const DEFAULT_JOB_STORE_TTL: Duration = Duration::from_secs(2 * 60 * 60);
+const DEFAULT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(30);
+// Default limit prevents runaway temp copies but can be disabled with 0.
+const DEFAULT_HYDRATION_COPY_MAX_BYTES: Option<u64> = Some(1_024 * 1_024 * 1_024);
+
+#[derive(Debug, Clone)]
+struct JobConfig {
+    job_store_cap: usize,
+    job_store_ttl: Duration,
+    hydration_timeout: Duration,
+    hydration_copy_max_bytes: Option<u64>,
+}
+
+impl JobConfig {
+    fn from_env() -> Self {
+        Self {
+            job_store_cap: parse_usize_env(JOB_STORE_CAP_ENV, DEFAULT_JOB_STORE_CAP),
+            job_store_ttl: parse_duration_env(JOB_STORE_TTL_SECS_ENV, DEFAULT_JOB_STORE_TTL),
+            hydration_timeout: parse_duration_env(
+                HYDRATION_TIMEOUT_SECS_ENV,
+                DEFAULT_HYDRATION_TIMEOUT,
+            ),
+            hydration_copy_max_bytes: parse_opt_u64_env(
+                HYDRATION_COPY_MAX_BYTES_ENV,
+                DEFAULT_HYDRATION_COPY_MAX_BYTES,
+            ),
+        }
+    }
+}
+
+fn config() -> &'static JobConfig {
+    static JOB_CONFIG: OnceLock<JobConfig> = OnceLock::new();
+    JOB_CONFIG.get_or_init(JobConfig::from_env)
+}
+
+fn parse_usize_env(var: &str, default: usize) -> usize {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_duration_env(var: &str, default: Duration) -> Duration {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(default)
+}
+
+fn parse_opt_u64_env(var: &str, default: Option<u64>) -> Option<u64> {
+    match std::env::var(var) {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(0) => None,
+            Ok(n) => Some(n),
+            Err(_) => default,
+        },
+        Err(_) => default,
+    }
 }
 
 impl Operation {
@@ -150,23 +222,18 @@ pub struct JobRecord {
     pub created_at: std::time::Instant,
 }
 
-/// Maximum number of jobs retained in memory.
-const JOB_STORE_CAP: usize = 10;
-/// Time-to-live for a job record.
-const JOB_STORE_TTL: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
-
 /// Shared in-memory ring-buffer of recent jobs.
 ///
-/// Old entries are evicted when `JOB_STORE_CAP` is exceeded or when an entry
-/// is older than `JOB_STORE_TTL`.  Both `JobQueue` and `run_worker` hold a
-/// clone of the `Arc` so they can write into it.
+/// Old entries are evicted when the configured capacity is exceeded or when an
+/// entry is older than the configured TTL. Both `JobQueue` and `run_worker`
+/// hold a clone of the `Arc` so they can write into it.
 #[derive(Clone)]
 pub struct JobStore(Arc<Mutex<VecDeque<JobRecord>>>);
 
 impl JobStore {
     pub fn new() -> Self {
         JobStore(Arc::new(Mutex::new(VecDeque::with_capacity(
-            JOB_STORE_CAP + 1,
+            config().job_store_cap + 1,
         ))))
     }
 
@@ -180,7 +247,7 @@ impl JobStore {
             log_lines: Vec::new(),
             created_at: std::time::Instant::now(),
         });
-        if guard.len() > JOB_STORE_CAP {
+        if guard.len() > config().job_store_cap {
             guard.pop_front();
         }
     }
@@ -227,7 +294,7 @@ impl JobStore {
 
     fn evict(&self, guard: &mut VecDeque<JobRecord>) {
         let now = std::time::Instant::now();
-        guard.retain(|r| now.duration_since(r.created_at) < JOB_STORE_TTL);
+        guard.retain(|r| now.duration_since(r.created_at) < config().job_store_ttl);
     }
 }
 
@@ -321,13 +388,19 @@ async fn process_job(store: &JobStore, job: WorkflowJob) {
     }
 
     // Normalise every input path (hydrate OneDrive placeholders / copy to
-    // temp dir on failure).
-    let mut local_paths: Vec<PathBuf> = Vec::new();
+    // temp dir on failure). Keep the TempDir alive for the duration of the job.
+    let mut local_paths: Vec<LocalPathGuard> = Vec::new();
     for raw in &job.resolved_paths {
         let path = PathBuf::from(raw);
         match ensure_local(&path).await {
             Ok(local) => {
-                job_log!(id, store, "job {id}: normalized {:?} → {:?}", path, local);
+                job_log!(
+                    id,
+                    store,
+                    "job {id}: normalized {:?} → {:?}",
+                    path,
+                    local.path()
+                );
                 local_paths.push(local);
             }
             Err(e) => {
@@ -345,7 +418,9 @@ async fn process_job(store: &JobStore, job: WorkflowJob) {
 
     // Dispatch one subprocess per input.  Any non-zero exit fails the job.
     let bin = music_operations_bin();
-    for input in &local_paths {
+    for local in &local_paths {
+        let input = local.path();
+
         let output_dir = match resolve_output_dir(&job, input) {
             Ok(d) => d,
             Err(e) => {
@@ -541,6 +616,33 @@ pub fn check_hydration(path: &Path) -> HydrationStatus {
 // Path normalization
 // ============================================================================
 
+/// Guard that keeps a hydrated file path alive along with any tempdir backing it.
+#[derive(Debug)]
+pub struct LocalPathGuard {
+    path: PathBuf,
+    _temp_dir: Option<tempfile::TempDir>,
+}
+
+impl LocalPathGuard {
+    fn owned(path: PathBuf) -> Self {
+        Self {
+            path,
+            _temp_dir: None,
+        }
+    }
+
+    fn with_tempdir(path: PathBuf, temp_dir: tempfile::TempDir) -> Self {
+        Self {
+            path,
+            _temp_dir: Some(temp_dir),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 /// Errors produced by [`ensure_local`].
 #[derive(Debug, thiserror::Error)]
 pub enum HydrationError {
@@ -564,10 +666,11 @@ pub enum HydrationError {
     /// Could not create a temporary directory.
     #[error("failed to create temp dir: {0}")]
     TempDirFailed(#[source] std::io::Error),
-}
 
-/// Maximum time to wait for a cloud-storage hydration command to finish.
-const HYDRATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    /// Copy fallback refused because the file exceeds the configured limit.
+    #[error("refused to copy {src} to temp dir: size {size} exceeds limit {limit}")]
+    TooLargeForCopy { src: PathBuf, size: u64, limit: u64 },
+}
 
 /// Ensure that `path` refers to a file whose bytes are physically present on
 /// the local filesystem before it is handed to a Python subprocess.
@@ -576,16 +679,15 @@ const HYDRATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30
 ///
 /// | State          | Action                                                        | Returns          |
 /// |----------------|---------------------------------------------------------------|------------------|
-/// | `Hydrated`     | No-op.                                                        | `Ok(path.to_path_buf())` |
-/// | `Placeholder`  | Trigger platform hydration, poll until `Hydrated` or timeout, then return the now-local path (or a copy in a temp dir on failure). | `Ok(local_copy)` |
+/// | `Hydrated`     | No-op.                                                        | `Ok(LocalPathGuard { path })` |
+/// | `Placeholder`  | Trigger platform hydration, poll until `Hydrated` or timeout, then return the now-local path (or a copy in a temp dir on failure). | `Ok(LocalPathGuard)` |
 /// | `NotFound`     | Return an error immediately.                                  | `Err(NotFound)`  |
 ///
-/// The returned `PathBuf` is always a path to a fully-local file.  When a
-/// copy to a temporary directory is made the caller is responsible for
-/// ensuring the `TempDir` outlives the subprocess (pass it through the job).
-pub async fn ensure_local(path: &Path) -> Result<PathBuf, HydrationError> {
+/// The returned guard keeps any fallback `TempDir` alive for the lifetime of
+/// the job, avoiding intentional leaks.
+pub async fn ensure_local(path: &Path) -> Result<LocalPathGuard, HydrationError> {
     match check_hydration(path) {
-        HydrationStatus::Hydrated => return Ok(path.to_path_buf()),
+        HydrationStatus::Hydrated => return Ok(LocalPathGuard::owned(path.to_path_buf())),
         HydrationStatus::NotFound => return Err(HydrationError::NotFound(path.to_path_buf())),
         HydrationStatus::Placeholder => {}
     }
@@ -595,11 +697,11 @@ pub async fn ensure_local(path: &Path) -> Result<PathBuf, HydrationError> {
     trigger_hydration(path).await;
 
     // Poll until the file is hydrated or we time out.
-    let deadline = tokio::time::Instant::now() + HYDRATION_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + config().hydration_timeout;
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         match check_hydration(path) {
-            HydrationStatus::Hydrated => return Ok(path.to_path_buf()),
+            HydrationStatus::Hydrated => return Ok(LocalPathGuard::owned(path.to_path_buf())),
             HydrationStatus::NotFound => return Err(HydrationError::NotFound(path.to_path_buf())),
             HydrationStatus::Placeholder => {}
         }
@@ -612,7 +714,7 @@ pub async fn ensure_local(path: &Path) -> Result<PathBuf, HydrationError> {
         "ensure_local: hydration timed out for {:?}, falling back to temp-dir copy",
         path
     );
-    copy_to_temp(path).await
+    copy_to_temp(path, config().hydration_copy_max_bytes).await
 }
 
 /// Invoke the platform-native command that requests a cloud file to be
@@ -657,44 +759,49 @@ async fn trigger_hydration(path: &Path) {
     }
 }
 
-/// Copy `src` into a newly-created temporary directory and return the path of
-/// the copy.  The `TempDir` guard is intentionally leaked so the copy
-/// persists for the duration of the process; a future phase can thread it
-/// through the job struct for proper cleanup.
-async fn copy_to_temp(src: &Path) -> Result<PathBuf, HydrationError> {
-    let file_name = src.file_name().ok_or_else(|| HydrationError::CopyFailed {
-        src: src.to_path_buf(),
-        source: std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path has no file name component",
-        ),
-    })?;
+/// Copy `src` into a newly-created temporary directory and return a guard that
+/// keeps that directory alive for the caller's lifetime.
+async fn copy_to_temp(
+    path: &Path,
+    max_bytes: Option<u64>,
+) -> Result<LocalPathGuard, HydrationError> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| HydrationError::NotFound(path.to_path_buf()))?;
+
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| HydrationError::CopyFailed {
+            src: path.to_path_buf(),
+            source: e,
+        })?;
+
+    let size = meta.len();
+    if let Some(limit) = max_bytes {
+        if size > limit {
+            return Err(HydrationError::TooLargeForCopy {
+                src: path.to_path_buf(),
+                size,
+                limit,
+            });
+        }
+    }
 
     let tmp_dir = tempfile::Builder::new()
-        .prefix("music_browser_hydrate_")
+        .prefix("music_browser_hydration_")
         .tempdir()
         .map_err(HydrationError::TempDirFailed)?;
 
     let dest = tmp_dir.path().join(file_name);
-
-    tokio::fs::copy(src, &dest)
+    tokio::fs::copy(path, &dest)
         .await
         .map_err(|e| HydrationError::CopyFailed {
-            src: src.to_path_buf(),
+            src: path.to_path_buf(),
             source: e,
         })?;
 
-    log::info!("ensure_local: copied {:?} → {:?}", src, dest);
-
-    // Keep the TempDir alive for the process lifetime.
-    std::mem::forget(tmp_dir);
-
-    Ok(dest)
+    Ok(LocalPathGuard::with_tempdir(dest, tmp_dir))
 }
-
-// ============================================================================
-// Unit tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -794,8 +901,9 @@ mod tests {
             "expected Ok for hydrated file, got {:?}",
             result
         );
+        let guard = result.unwrap();
         assert_eq!(
-            result.unwrap(),
+            guard.path(),
             tmp.path(),
             "expected path to be unchanged for an already-local file"
         );
@@ -818,7 +926,7 @@ mod tests {
         src.write_all(b"audio bytes").expect("write");
         let src_path = src.path().to_path_buf();
 
-        let result = copy_to_temp(&src_path).await;
+        let result = copy_to_temp(&src_path, None).await;
         assert!(
             result.is_ok(),
             "expected copy_to_temp to succeed, got {:?}",
@@ -827,15 +935,15 @@ mod tests {
 
         let dest = result.unwrap();
         assert_eq!(
-            dest.file_name(),
+            dest.path().file_name(),
             src_path.file_name(),
             "expected dest filename {:?} to match src {:?}",
-            dest.file_name(),
+            dest.path().file_name(),
             src_path.file_name()
         );
 
-        let content = std::fs::read(&dest)
-            .unwrap_or_else(|e| panic!("could not read copied file {:?}: {e}", dest));
+        let content = std::fs::read(dest.path())
+            .unwrap_or_else(|e| panic!("could not read copied file {:?}: {e}", dest.path()));
         assert_eq!(
             content, b"audio bytes",
             "copied file content does not match source"
@@ -845,10 +953,25 @@ mod tests {
     #[tokio::test]
     async fn test_copy_to_temp_fails_for_nonexistent_source() {
         let missing = Path::new("/tmp/__nonexistent_music_browser_copy_test__.wav");
-        let result = copy_to_temp(missing).await;
+        let result = copy_to_temp(missing, None).await;
         assert!(
             matches!(result, Err(HydrationError::CopyFailed { .. })),
             "expected CopyFailed for missing source, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_to_temp_respects_max_bytes_limit() {
+        let mut src = NamedTempFile::new().expect("tempfile");
+        // 8 bytes
+        src.write_all(b"12345678").expect("write");
+        let src_path = src.path().to_path_buf();
+
+        let result = copy_to_temp(&src_path, Some(4)).await;
+        assert!(
+            matches!(result, Err(HydrationError::TooLargeForCopy { .. })),
+            "expected TooLargeForCopy, got {:?}",
             result
         );
     }
