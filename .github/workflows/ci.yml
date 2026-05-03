@@ -218,7 +218,7 @@ jobs:
           if [[ -z "$VST3" ]]; then
               VST3=$(find dl-vst3 -name '*.vst3' | head -n1)
           fi
-          VST3_PATH="$VST3" FIXTURE_WAV="$FIXTURE_WAV" \
+          VST3_PATH="${GITHUB_WORKSPACE}/${VST3}" FIXTURE_WAV="$FIXTURE_WAV" \
               bash music_ara_client/scripts/reaper_ci.sh
           END=$(date +%s)
           echo $((END - START)) > cpp-reaper-smoke.sec
