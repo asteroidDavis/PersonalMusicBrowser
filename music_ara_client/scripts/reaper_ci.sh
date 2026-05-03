@@ -95,7 +95,27 @@ rm -rf "$USER_VST3_DIR/$(basename "$VST3_PATH")"
 cp -R "$VST3_PATH" "$USER_VST3_DIR/"
 
 # ---------------------------------------------------------------------------
-# 3. Write a ReaScript probe that loads the fixture, instantiates the plugin
+# 3. Initialize REAPER config to ensure ~/.vst3 is scanned.
+# ---------------------------------------------------------------------------
+REAPER_INI_DIR="$HOME/.config/REAPER"
+if [[ "$OS" == "Darwin" ]]; then
+    REAPER_INI_DIR="$HOME/Library/Application Support/REAPER"
+fi
+mkdir -p "$REAPER_INI_DIR"
+if [[ ! -f "$REAPER_INI_DIR/reaper.ini" ]]; then
+    cat > "$REAPER_INI_DIR/reaper.ini" <<EOF
+[REAPER]
+vstpath=$USER_VST3_DIR
+EOF
+else
+    # if it exists, try to make sure it includes the directory
+    if ! grep -q "vstpath" "$REAPER_INI_DIR/reaper.ini"; then
+        echo "vstpath=$USER_VST3_DIR" >> "$REAPER_INI_DIR/reaper.ini"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Write a ReaScript probe that loads the fixture, instantiates the plugin
 #    as an ARA track FX, and dumps the audio source's persistent ID.
 # ---------------------------------------------------------------------------
 PROBE_LUA="$WORK_DIR/ara_probe.lua"
@@ -115,7 +135,9 @@ local src = reaper.PCM_Source_CreateFromFile(wav_path)
 reaper.SetMediaItemTake_Source(tk, src)
 reaper.UpdateArrange()
 
-local ara_fx = reaper.TrackFX_AddByName(tr, "SendToHubPlugin<ARA>", false, -1)
+local ara_fx = reaper.TrackFX_AddByName(tr, "Send To Music Browser<ARA>", false, -1)
+if ara_fx < 0 then ara_fx = reaper.TrackFX_AddByName(tr, "Send To Music Browser", false, -1) end
+if ara_fx < 0 then ara_fx = reaper.TrackFX_AddByName(tr, "SendToHubPlugin<ARA>", false, -1) end
 if ara_fx < 0 then ara_fx = reaper.TrackFX_AddByName(tr, "SendToHubPlugin", false, -1) end
 
 local ok = ara_fx >= 0
