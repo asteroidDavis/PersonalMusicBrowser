@@ -121,7 +121,7 @@
         {% for f in entry.files %}
             <div class="file-card">
                 <span class="file-type-badge">{{ f.file_type }}</span>
-                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
+                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<a href="file://{{ f.path }}" target="_blank" style="color:var(--accent)" title="Click to open file">📄 {{ f.path }}</a>{% endif %}
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<p class="text-muted">{{ f.description }}</p>{% endif %}
             </div>
@@ -129,6 +129,17 @@
         </div>
     </div>
     {% endif %}
+
+    {# Practice Journal #}
+    <details style="margin-top:1rem;">
+        <summary style="cursor:pointer;color:var(--prac-accent);font-weight:500;padding:.5rem 0;list-style:none;">📝 Practice Journal</summary>
+        <summary style="list-style:none;"></summary>
+        <div style="margin-top:.75rem;padding:1rem;background:var(--bg);border-radius:var(--radius);">
+            <p class="text-muted" style="font-size:.85rem;margin-bottom:.75rem;">Take notes about what to focus on during practice sessions. Track your progress over the next 3 days.</p>
+            <textarea placeholder="What should I focus on in this practice session? What areas need improvement?" rows="3" style="width:100%;padding:.75rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;resize:vertical;margin-bottom:.75rem;"></textarea>
+            <button class="btn btn-primary btn-sm">💾 Save Note</button>
+        </div>
+    </details>
 </div>
 {% endfor %}
 

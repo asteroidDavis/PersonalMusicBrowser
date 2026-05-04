@@ -73,6 +73,39 @@
         </div>
     </div>
     <div id="enqueue-result"></div>
+
+    <details style="margin-top:1.5rem;">
+        <summary style="cursor:pointer;color:var(--text-muted);font-size:.85rem;padding:.5rem 0;list-style:none;">🧪 Test Examples</summary>
+        <summary style="list-style:none;"></summary>
+        <div style="margin-top:.75rem;padding:1rem;background:var(--bg);border-radius:var(--radius);font-size:.85rem;">
+            <p class="text-muted" style="margin-bottom:.75rem;">Use these example values to test workflow jobs. Replace paths with your actual file paths.</p>
+            <div style="display:grid;gap:.75rem;">
+                <div style="background:var(--surface);padding:.75rem;border-radius:4px;border:1px solid var(--border);">
+                    <strong style="color:var(--prod-accent);font-size:.9rem;">🎼 Generate Sheet Music</strong>
+                    <div style="margin-top:.5rem;font-family:monospace;font-size:.8rem;color:var(--text-muted);">
+                        Target: song (use song ID from Songs page)<br>
+                        Operation: generate_sheet_music
+                    </div>
+                </div>
+                <div style="background:var(--surface);padding:.75rem;border-radius:4px;border:1px solid var(--border);">
+                    <strong style="color:var(--prod-accent);font-size:.9rem;">📦 Repomix</strong>
+                    <div style="margin-top:.5rem;font-family:monospace;font-size:.8rem;color:var(--text-muted);">
+                        Target: directory<br>
+                        Path: /Users/yourname/Music/MyProject<br>
+                        Operation: repomix
+                    </div>
+                </div>
+                <div style="background:var(--surface);padding:.75rem;border-radius:4px;border:1px solid var(--border);">
+                    <strong style="color:var(--prod-accent);font-size:.9rem;">🎯 Hitpoints</strong>
+                    <div style="margin-top:.5rem;font-family:monospace;font-size:.8rem;color:var(--text-muted);">
+                        Target: file<br>
+                        Path: /Users/yourname/Music/song.wav<br>
+                        Operation: hitpoints
+                    </div>
+                </div>
+            </div>
+        </div>
+    </details>
 </div>
 
 {% if jobs.is_empty() %}
