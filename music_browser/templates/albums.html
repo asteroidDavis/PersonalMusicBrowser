@@ -2,12 +2,16 @@
 {% block title %}Albums — Personal Music Browser{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Albums</h2>
+    <h2>💿 Albums</h2>
     <a href="/albums/new" class="btn btn-primary">+ Add Album</a>
 </div>
 {% if albums.is_empty() %}
-    <p class="empty">No albums yet.</p>
+    <div class="empty">
+        <p>💿 No albums yet. Add one to get started!</p>
+        <a href="/albums/new" class="btn btn-primary" style="margin-top:1rem;">+ Add Your First Album</a>
+    </div>
 {% else %}
+    <p class="count">Found {{ albums.len() }} albums</p>
     <table>
         <thead>
             <tr><th>Title</th><th>Released</th><th>URL</th><th>Actions</th></tr>
@@ -15,12 +19,12 @@
         <tbody>
         {% for a in albums %}
             <tr>
-                <td>{{ a.title }}</td>
-                <td>{% if a.released %}✓{% else %}✗{% endif %}</td>
-                <td>{% if a.url.is_empty() %}—{% else %}<a href="{{ a.url }}" style="color:var(--accent)">{{ a.url }}</a>{% endif %}</td>
+                <td><strong>{{ a.title }}</strong></td>
+                <td>{% if a.released %}<span style="color:var(--prac-accent);font-weight:600;">✓</span>{% else %}<span class="text-muted">✗</span>{% endif %}</td>
+                <td>{% if a.url.is_empty() %}<span class="text-muted">—</span>{% else %}<a href="{{ a.url }}" target="blank" style="color:var(--accent)">{{ a.url }}</a>{% endif %}</td>
                 <td class="actions">
                     <form method="post" action="/albums/{{ a.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this album?')">🗑️ Delete</button>
                     </form>
                 </td>
             </tr>

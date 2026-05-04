@@ -1,26 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Add Artist — Personal Music Browser{% endblock %}
 {% block content %}
-<h2>Add Artist</h2>
+<div class="page-header">
+    <h2>Add Artist</h2>
+</div>
 <form class="form" method="post">
     <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" required value="{{ name }}">
+        <label for="name">Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="name" name="name" required value="{{ name }}" placeholder="Enter artist name">
     </div>
     <div class="form-group">
         <label>Bands</label>
-        {% for b in bands %}
-            <label class="checkbox-label">
-                <input type="checkbox" name="band_ids[]" value="{{ b.id }}" {% if b.selected %}checked{% endif %}>
-                {{ b.name }}
-            </label>
-        {% endfor %}
+        <div style="display:flex;flex-wrap:wrap;gap:1rem;padding:.5rem 0;">
+            {% for b in bands %}
+                <label class="checkbox-label">
+                    <input type="checkbox" name="band_ids[]" value="{{ b.id }}" {% if b.selected %}checked{% endif %}>
+                    {{ b.name }}
+                </label>
+            {% endfor %}
+        </div>
         {% if bands.is_empty() %}
             <p class="count">No bands yet. <a href="/bands/new" style="color:var(--accent)">Create one first?</a></p>
         {% endif %}
     </div>
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary">💾 Save Artist</button>
         <a href="/artists" class="btn">Cancel</a>
     </div>
 </form>

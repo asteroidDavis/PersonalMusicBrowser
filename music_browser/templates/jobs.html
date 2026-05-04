@@ -5,34 +5,36 @@
 {% block content %}
 <style>
     .jobs-header h2 { color:#a78bfa; }
-    .job-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem; margin-bottom:1rem; display:grid; grid-template-columns:auto 1fr auto; gap:.75rem 1.25rem; align-items:start; }
-    .job-card:hover { border-color:#a78bfa44; }
-    .job-id { font-size:1.5rem; font-weight:700; color:#a78bfa; line-height:1; padding-top:.15rem; }
-    .job-meta { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.4rem; align-items:center; }
-    .job-target { color:var(--text); font-size:.95rem; margin-bottom:.3rem; }
-    .job-target code { color:#a78bfa; font-size:.85rem; }
-    .job-paths { margin:.3rem 0 0; }
-    .job-paths summary { color:var(--text-muted); font-size:.8rem; cursor:pointer; }
-    .job-paths ol { margin:.3rem 0 0 1rem; }
-    .job-paths li { font-size:.78rem; color:var(--text-muted); font-family:monospace; }
-    .job-actions { display:flex; flex-direction:column; gap:.4rem; align-items:flex-end; }
-    .status-badge { display:inline-block; padding:.2rem .55rem; border-radius:3px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
-    .status-queued  { background:rgba(251,191,36,.15); color:#fbbf24; border:1px solid #fbbf2440; }
-    .status-running { background:rgba(96,165,250,.15); color:#60a5fa; border:1px solid #60a5fa40; }
-    .status-done    { background:rgba(52,211,153,.15); color:#34d399; border:1px solid #34d39940; }
-    .status-failed  { background:rgba(248,113,113,.15); color:#f87171; border:1px solid #f8717140; }
-    .op-badge { background:rgba(167,139,250,.12); color:#a78bfa; padding:.15rem .45rem; border-radius:3px; font-size:.75rem; font-weight:600; }
-    .target-badge { background:rgba(255,255,255,.06); color:var(--text-muted); padding:.15rem .45rem; border-radius:3px; font-size:.75rem; }
-    .log-pill { background:rgba(255,255,255,.04); color:var(--text-muted); padding:.15rem .45rem; border-radius:3px; font-size:.75rem; }
-    .empty-jobs { text-align:center; padding:4rem 1rem; color:var(--text-muted); }
+    .job-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.5rem; margin-bottom:1.25rem; display:grid; grid-template-columns:auto 1fr auto; gap:1rem 1.5rem; align-items:start; box-shadow:var(--shadow); transition:box-shadow .2s, border-color .2s; }
+    .job-card:hover { border-color:#a78bfa44; box-shadow:var(--shadow-lg); }
+    .job-id { font-size:1.75rem; font-weight:700; color:#a78bfa; line-height:1; padding-top:.2rem; }
+    .job-meta { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.5rem; align-items:center; }
+    .job-target { color:var(--text); font-size:.95rem; margin-bottom:.4rem; }
+    .job-target code { color:#a78bfa; font-size:.85rem; background:rgba(167,139,250,.1); padding:.15rem .4rem; border-radius:4px; }
+    .job-paths { margin:.4rem 0 0; }
+    .job-paths summary { color:var(--text-muted); font-size:.85rem; cursor:pointer; list-style:none; padding:.25rem 0; }
+    .job-paths summary::-webkit-details-marker { display:none; }
+    .job-paths ol { margin:.4rem 0 0 1.25rem; }
+    .job-paths li { font-size:.8rem; color:var(--text-muted); font-family:monospace; padding:.15rem 0; }
+    .job-actions { display:flex; flex-direction:column; gap:.5rem; align-items:flex-end; }
+    .status-badge { display:inline-flex; align-items:center; gap:.3rem; padding:.25rem .65rem; border-radius:4px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; white-space:nowrap; }
+    .status-queued  { background:rgba(251,191,36,.15); color:#fbbf24; border:1px solid rgba(251,191,36,.3); }
+    .status-running { background:rgba(96,165,250,.15); color:#60a5fa; border:1px solid rgba(96,165,250,.3); animation:pulse 2s infinite; }
+    .status-done    { background:rgba(52,211,153,.15); color:#34d399; border:1px solid rgba(52,211,153,.3); }
+    .status-failed  { background:rgba(248,113,113,.15); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+    @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:.7; } }
+    .op-badge { background:rgba(167,139,250,.15); color:#a78bfa; padding:.2rem .55rem; border-radius:4px; font-size:.75rem; font-weight:600; border:1px solid rgba(167,139,250,.2); }
+    .target-badge { background:rgba(255,255,255,.08); color:var(--text-muted); padding:.2rem .55rem; border-radius:4px; font-size:.75rem; border:1px solid rgba(255,255,255,.05); }
+    .log-pill { background:rgba(255,255,255,.06); color:var(--text-muted); padding:.2rem .55rem; border-radius:4px; font-size:.75rem; border:1px solid rgba(255,255,255,.05); }
+    .empty-jobs { text-align:center; padding:5rem 2rem; color:var(--text-muted); background:var(--surface); border-radius:var(--radius); border:1px dashed var(--border); }
     .empty-jobs p { margin-bottom:1rem; font-size:1.1rem; }
-    .enqueue-panel { background:var(--surface); border:1px solid #a78bfa33; border-radius:var(--radius); padding:1.5rem; margin-bottom:2rem; }
-    .enqueue-panel h3 { color:#a78bfa; margin-bottom:1rem; font-size:1rem; }
-    .enqueue-row { display:flex; gap:.75rem; flex-wrap:wrap; align-items:flex-end; }
-    .enqueue-row .form-group { margin:0; flex:1; min-width:140px; }
-    .enqueue-row .form-group label { font-size:.8rem; }
+    .enqueue-panel { background:var(--surface); border:1px solid rgba(167,139,250,.3); border-radius:var(--radius); padding:1.75rem; margin-bottom:2rem; box-shadow:var(--shadow); }
+    .enqueue-panel h3 { color:#a78bfa; margin-bottom:1.25rem; font-size:1.1rem; font-weight:600; }
+    .enqueue-row { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end; }
+    .enqueue-row .form-group { margin:0; flex:1; min-width:160px; }
+    .enqueue-row .form-group label { font-size:.85rem; font-weight:500; }
     .enqueue-row select, .enqueue-row input { font-size:.9rem; }
-    #enqueue-result { margin-top:.75rem; font-size:.85rem; color:var(--text-muted); min-height:1.4em; }
+    #enqueue-result { margin-top:.85rem; font-size:.85rem; color:var(--text-muted); min-height:1.5em; padding:.5rem; background:var(--bg); border-radius:4px; border:1px solid var(--border); }
 </style>
 
 <div class="page-header jobs-header">
@@ -41,15 +43,15 @@
 </div>
 
 <div class="enqueue-panel">
-    <h3>Submit new job</h3>
+    <h3>📝 Submit new job</h3>
     <div class="enqueue-row">
         <div class="form-group">
             <label>Target type</label>
             <select id="eq-target-type">
-                <option value="song">song</option>
-                <option value="live_set">live_set</option>
-                <option value="file">file</option>
-                <option value="directory">directory</option>
+                <option value="song">🎵 Song</option>
+                <option value="live_set">🎤 Live Set</option>
+                <option value="file">📁 File</option>
+                <option value="directory">📂 Directory</option>
             </select>
         </div>
         <div class="form-group" style="flex:2">
@@ -59,15 +61,15 @@
         <div class="form-group">
             <label>Operation</label>
             <select id="eq-operation" onchange="updateOpHint()">
-                <option value="generate_sheet_music">generate_sheet_music</option>
-                <option value="repomix">repomix</option>
-                <option value="hitpoints">hitpoints</option>
+                <option value="generate_sheet_music">🎼 Generate Sheet Music</option>
+                <option value="repomix">📦 Repomix</option>
+                <option value="hitpoints">🎯 Hitpoints</option>
             </select>
-            <div id="op-hint" class="text-muted" style="font-size:.75rem;margin-top:.3rem;line-height:1.3;"></div>
+            <div id="op-hint" class="text-muted" style="font-size:.8rem;margin-top:.35rem;line-height:1.4;"></div>
         </div>
         <div class="form-group" style="flex:0">
             <label>&nbsp;</label>
-            <button class="btn btn-primary" onclick="submitJob()">Enqueue</button>
+            <button class="btn btn-primary" onclick="submitJob()">🚀 Enqueue</button>
         </div>
     </div>
     <div id="enqueue-result"></div>
@@ -75,7 +77,7 @@
 
 {% if jobs.is_empty() %}
 <div class="empty-jobs">
-    <p>No jobs yet.</p>
+    <p>🔍 No jobs yet.</p>
     <p class="text-muted">Use the form above or POST to <code>/api/workflows</code> to enqueue one.</p>
 </div>
 {% else %}
@@ -87,12 +89,12 @@
             <span class="status-badge status-{{ j.status }}">{{ j.status_label }}</span>
             <span class="op-badge">{{ j.operation }}</span>
             <span class="target-badge">{{ j.target_type }}</span>
-            <span class="log-pill">{{ j.log_count }} log line(s)</span>
+            <span class="log-pill">📋 {{ j.log_count }} log line(s)</span>
         </div>
         <div class="job-target">Target: <code>{{ j.target }}</code></div>
         {% if !j.resolved_paths.is_empty() %}
         <details class="job-paths">
-            <summary>{{ j.resolved_paths.len() }} resolved path(s)</summary>
+            <summary>📂 {{ j.resolved_paths.len() }} resolved path(s)</summary>
             <ol>{% for p in j.resolved_paths %}<li>{{ p }}</li>{% endfor %}</ol>
         </details>
         {% endif %}
@@ -107,8 +109,8 @@
 <script>
 const OP_HINTS = {
     generate_sheet_music: '⚠ Requires <strong>AnthemScore</strong> to be installed (configured in the music-operations bundle).',
-    repomix: 'Packs the target directory with Repomix.',
-    hitpoints: 'Not yet wired to an external CLI — jobs will be marked failed.',
+    repomix: '📦 Packs the target directory with Repomix for AI analysis.',
+    hitpoints: '🎯 Not yet wired to an external CLI — jobs will be marked failed.',
 };
 function updateOpHint() {
     const op = document.getElementById('eq-operation').value;
@@ -123,7 +125,7 @@ async function submitJob() {
         operation: document.getElementById('eq-operation').value,
     };
     const el = document.getElementById('enqueue-result');
-    if (!payload.target_id_or_path) { el.textContent = '⚠ Target is required.'; return; }
+    if (!payload.target_id_or_path) { el.textContent = '⚠ Target is required.'; el.style.color = 'var(--danger)'; return; }
     try {
         const r = await fetch('/api/workflows', {
             method: 'POST',
@@ -132,13 +134,16 @@ async function submitJob() {
         });
         const data = await r.json().catch(() => ({}));
         if (r.ok) {
-            el.innerHTML = `✅ Accepted — job <strong>#${data.job_id}</strong>. <a href="/jobs/${data.job_id}">View →</a>`;
+            el.innerHTML = `✅ Accepted — job <strong>#${data.job_id}</strong>. <a href="/jobs/${data.job_id}" style="color:#a78bfa;">View →</a>`;
+            el.style.color = 'var(--text)';
             setTimeout(() => location.reload(), 800);
         } else {
             el.textContent = `❌ ${r.status}: ${data.message ?? JSON.stringify(data)}`;
+            el.style.color = 'var(--danger)';
         }
     } catch (e) {
         el.textContent = `❌ Network error: ${e}`;
+        el.style.color = 'var(--danger)';
     }
 }
 </script>

@@ -1,30 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Add Instrument — Personal Music Browser{% endblock %}
 {% block content %}
-<h2>Add Instrument</h2>
+<div class="page-header">
+    <h2>Add Instrument</h2>
+</div>
 <form class="form" method="post">
     <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" required value="{{ name }}">
+        <label for="name">Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="name" name="name" required value="{{ name }}" placeholder="Enter instrument name">
     </div>
     <div class="form-group">
         <label for="instrument_type">Type</label>
         <select id="instrument_type" name="instrument_type">
-            <option value="guitar" {% if instrument_type == "guitar" %}selected{% endif %}>Guitar</option>
-            <option value="bass" {% if instrument_type == "bass" %}selected{% endif %}>Bass</option>
-            <option value="piano" {% if instrument_type == "piano" %}selected{% endif %}>Piano</option>
-            <option value="drums" {% if instrument_type == "drums" %}selected{% endif %}>Drums</option>
-            <option value="vocals" {% if instrument_type == "vocals" %}selected{% endif %}>Vocals</option>
-            <option value="synth" {% if instrument_type == "synth" %}selected{% endif %}>Synth</option>
-            <option value="strings" {% if instrument_type == "strings" %}selected{% endif %}>Strings</option>
-            <option value="brass" {% if instrument_type == "brass" %}selected{% endif %}>Brass</option>
-            <option value="woodwind" {% if instrument_type == "woodwind" %}selected{% endif %}>Woodwind</option>
-            <option value="percussion" {% if instrument_type == "percussion" %}selected{% endif %}>Percussion</option>
-            <option value="other" {% if instrument_type == "other" %}selected{% endif %}>Other</option>
+            <option value="guitar" {% if instrument_type == "guitar" %}selected{% endif %}>🎸 Guitar</option>
+            <option value="bass" {% if instrument_type == "bass" %}selected{% endif %}>🎸 Bass</option>
+            <option value="piano" {% if instrument_type == "piano" %}selected{% endif %}>🎹 Piano</option>
+            <option value="drums" {% if instrument_type == "drums" %}selected{% endif %}>🥁 Drums</option>
+            <option value="vocals" {% if instrument_type == "vocals" %}selected{% endif %}>🎤 Vocals</option>
+            <option value="synth" {% if instrument_type == "synth" %}selected{% endif %}>🎛️ Synth</option>
+            <option value="strings" {% if instrument_type == "strings" %}selected{% endif %}>🎻 Strings</option>
+            <option value="brass" {% if instrument_type == "brass" %}selected{% endif %}>🎺 Brass</option>
+            <option value="woodwind" {% if instrument_type == "woodwind" %}selected{% endif %}>🪈 Woodwind</option>
+            <option value="percussion" {% if instrument_type == "percussion" %}selected{% endif %}>🥁 Percussion</option>
+            <option value="other" {% if instrument_type == "other" %}selected{% endif %}>🎵 Other</option>
         </select>
     </div>
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary">💾 Save Instrument</button>
         <a href="/instruments" class="btn">Cancel</a>
     </div>
 </form>

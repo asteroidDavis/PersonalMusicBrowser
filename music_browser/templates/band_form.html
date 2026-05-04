@@ -1,14 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Add Band — Personal Music Browser{% endblock %}
 {% block content %}
-<h2>Add Band</h2>
+<div class="page-header">
+    <h2>Add Band</h2>
+</div>
 <form class="form" method="post">
     <div class="form-group">
-        <label for="name">Name</label>
-        <input type="text" id="name" name="name" required value="{{ name }}">
+        <label for="name">Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="name" name="name" required value="{{ name }}" placeholder="Enter band name">
     </div>
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary">💾 Save Band</button>
         <a href="/bands" class="btn">Cancel</a>
     </div>
 </form>

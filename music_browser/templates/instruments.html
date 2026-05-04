@@ -2,12 +2,16 @@
 {% block title %}Instruments — Personal Music Browser{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Instruments</h2>
+    <h2>🎸 Instruments</h2>
     <a href="/instruments/new" class="btn btn-primary">+ Add Instrument</a>
 </div>
 {% if instruments.is_empty() %}
-    <p class="empty">No instruments yet.</p>
+    <div class="empty">
+        <p>🎸 No instruments yet. Add one to get started!</p>
+        <a href="/instruments/new" class="btn btn-primary" style="margin-top:1rem;">+ Add Your First Instrument</a>
+    </div>
 {% else %}
+    <p class="count">Found {{ instruments.len() }} instruments</p>
     <table>
         <thead>
             <tr><th>Name</th><th>Type</th><th>Actions</th></tr>
@@ -15,11 +19,11 @@
         <tbody>
         {% for i in instruments %}
             <tr>
-                <td>{{ i.name }}</td>
-                <td>{{ i.instrument_type }}</td>
+                <td><strong>{{ i.name }}</strong></td>
+                <td><span class="song-type-badge" style="background:rgba(255,255,255,.1);color:var(--text-muted);">{{ i.instrument_type }}</span></td>
                 <td class="actions">
                     <form method="post" action="/instruments/{{ i.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this instrument?')">🗑️ Delete</button>
                     </form>
                 </td>
             </tr>

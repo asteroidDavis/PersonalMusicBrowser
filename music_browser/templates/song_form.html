@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{% if editing %}Edit Song{% else %}Add Song{% endif %} — Personal Music Browser{% endblock %}
 {% block content %}
-<h2>{% if editing %}Edit Song{% else %}Add Song{% endif %}</h2>
+<div class="page-header">
+    <h2>{% if editing %}Edit Song{% else %}Add Song{% endif %}</h2>
+</div>
 <form class="form" method="post">
     <input type="hidden" name="return_to" value="{{ return_to }}">
     <div class="form-group">
-        <label for="title">Title</label>
-        <input type="text" id="title" name="title" required value="{{ title }}">
+        <label for="title">Title <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="title" name="title" required value="{{ title }}" placeholder="Enter song title">
     </div>
     <div class="form-group">
         <label for="album_id">Album</label>
@@ -20,64 +22,64 @@
     <div class="form-group">
         <label for="song_type">Song Type</label>
         <select id="song_type" name="song_type">
-            <option value="song" {% if song_type == "song" %}selected{% endif %}>Song</option>
-            <option value="cover" {% if song_type == "cover" %}selected{% endif %}>Cover</option>
-            <option value="composition" {% if song_type == "composition" %}selected{% endif %}>Composition</option>
-            <option value="original" {% if song_type == "original" %}selected{% endif %}>Original</option>
-            <option value="practice" {% if song_type == "practice" %}selected{% endif %}>Practice</option>
+            <option value="song" {% if song_type == "song" %}selected{% endif %}>🎵 Song</option>
+            <option value="cover" {% if song_type == "cover" %}selected{% endif %}>🎤 Cover</option>
+            <option value="composition" {% if song_type == "composition" %}selected{% endif %}>✍️ Composition</option>
+            <option value="original" {% if song_type == "original" %}selected{% endif %}>💡 Original</option>
+            <option value="practice" {% if song_type == "practice" %}selected{% endif %}>🎸 Practice</option>
         </select>
     </div>
     <div class="form-group">
         <label for="original_artist">Original Artist</label>
-        <input type="text" id="original_artist" name="original_artist" value="{{ original_artist }}">
+        <input type="text" id="original_artist" name="original_artist" value="{{ original_artist }}" placeholder="Original artist (if cover)">
     </div>
-    <div class="form-group">
-        <label for="key">Key</label>
-        <input type="text" id="key" name="key" value="{{ key }}" placeholder="e.g. C major, Am">
-    </div>
-    <div class="form-group" style="display:flex;gap:1rem;align-items:end">
-        <div style="display:flex;gap:1rem;flex:1">
-            <div>
-                <label for="bpm_lower">BPM Lower</label>
-                <input type="number" id="bpm_lower" name="bpm_lower" value="{% match bpm_lower %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
-            </div>
-            <div>
-                <label for="bpm_upper">BPM Upper</label>
-                <input type="number" id="bpm_upper" name="bpm_upper" value="{% match bpm_upper %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}">
-            </div>
+    <div class="form-group" style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+        <div style="flex:1;min-width:140px;">
+            <label for="bpm_lower">BPM Lower</label>
+            <input type="number" id="bpm_lower" name="bpm_lower" value="{% match bpm_lower %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}" placeholder="e.g. 120">
+        </div>
+        <div style="flex:1;min-width:140px;">
+            <label for="bpm_upper">BPM Upper</label>
+            <input type="number" id="bpm_upper" name="bpm_upper" value="{% match bpm_upper %}{% when Some with (v) %}{{ v }}{% when None %}{% endmatch %}" placeholder="e.g. 130">
         </div>
         <div>
             <button type="button" id="tap-tempo-btn" class="btn btn-sm">🥁 Tap Tempo</button>
-            <div id="tap-display" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem;text-align:center;"></div>
+            <div id="tap-display" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem;text-align:center;min-height:1.2em;"></div>
         </div>
     </div>
     <div class="form-group">
+        <label for="key">Key</label>
+        <input type="text" id="key" name="key" value="{{ key }}" placeholder="e.g. C major, Am, D minor">
+    </div>
+    <div class="form-group">
         <label for="sheet_music">Sheet Music Path</label>
-        <input type="text" id="sheet_music" name="sheet_music" value="{{ sheet_music }}">
+        <input type="text" id="sheet_music" name="sheet_music" value="{{ sheet_music }}" placeholder="/path/to/sheet/music.pdf">
     </div>
     <div class="form-group">
         <label for="score_url">Score URL</label>
-        <input type="text" id="score_url" name="score_url" value="{{ score_url }}">
+        <input type="text" id="score_url" name="score_url" value="{{ score_url }}" placeholder="https://example.com/score">
     </div>
     <div class="form-group">
         <label for="lyrics">Lyrics Path</label>
-        <input type="text" id="lyrics" name="lyrics" value="{{ lyrics }}">
+        <input type="text" id="lyrics" name="lyrics" value="{{ lyrics }}" placeholder="/path/to/lyrics.txt">
     </div>
     <div class="form-group">
         <label for="description">Description</label>
-        <textarea id="description" name="description" rows="3">{{ description }}</textarea>
+        <textarea id="description" name="description" rows="3" placeholder="Add notes about this song...">{{ description }}</textarea>
     </div>
     <div class="form-group">
         <label>Artists</label>
-        {% for a in artists %}
-            <label class="checkbox-label">
-                <input type="checkbox" name="artist_ids[]" value="{{ a.id }}" {% if a.selected %}checked{% endif %}>
-                {{ a.name }}
-            </label>
-        {% endfor %}
+        <div style="display:flex;flex-wrap:wrap;gap:1rem;padding:.5rem 0;">
+            {% for a in artists %}
+                <label class="checkbox-label">
+                    <input type="checkbox" name="artist_ids[]" value="{{ a.id }}" {% if a.selected %}checked{% endif %}>
+                    {{ a.name }}
+                </label>
+            {% endfor %}
+        </div>
     </div>
     <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary">💾 Save Song</button>
         <a href="/" class="btn">Cancel</a>
     </div>
 </form>

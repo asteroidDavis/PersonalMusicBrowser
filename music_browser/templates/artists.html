@@ -2,12 +2,16 @@
 {% block title %}Artists — Personal Music Browser{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Artists</h2>
+    <h2>🎤 Artists</h2>
     <a href="/artists/new" class="btn btn-primary">+ Add Artist</a>
 </div>
 {% if artists.is_empty() %}
-    <p class="empty">No artists yet.</p>
+    <div class="empty">
+        <p>🎤 No artists yet. Add one to get started!</p>
+        <a href="/artists/new" class="btn btn-primary" style="margin-top:1rem;">+ Add Your First Artist</a>
+    </div>
 {% else %}
+    <p class="count">Found {{ artists.len() }} artists</p>
     <table>
         <thead>
             <tr><th>Name</th><th>Bands</th><th>Actions</th></tr>
@@ -15,11 +19,11 @@
         <tbody>
         {% for a in artists %}
             <tr>
-                <td>{{ a.name }}</td>
-                <td>{% if a.band_names.is_empty() %}—{% else %}{{ a.band_names }}{% endif %}</td>
+                <td><strong>{{ a.name }}</strong></td>
+                <td>{% if a.band_names.is_empty() %}<span class="text-muted">—</span>{% else %}{{ a.band_names }}{% endif %}</td>
                 <td class="actions">
                     <form method="post" action="/artists/{{ a.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this artist?')">🗑️ Delete</button>
                     </form>
                 </td>
             </tr>

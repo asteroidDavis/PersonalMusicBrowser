@@ -2,11 +2,14 @@
 {% block title %}Songs — Personal Music Browser{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Songs</h2>
+    <h2>🎵 Songs</h2>
     <a href="/songs/new" class="btn btn-primary">+ Add Song</a>
 </div>
 {% if songs.is_empty() %}
-    <p class="empty">No songs found. Add one to get started!</p>
+    <div class="empty">
+        <p>🎶 No songs found. Add one to get started!</p>
+        <a href="/songs/new" class="btn btn-primary" style="margin-top:1rem;">+ Add Your First Song</a>
+    </div>
 {% else %}
     <p class="count">Found {{ songs.len() }} songs</p>
     <table>
@@ -16,15 +19,15 @@
         <tbody>
         {% for s in songs %}
             <tr>
-                <td>{{ s.title }}</td>
-                <td>{{ s.album_title }}</td>
-                <td>{{ s.song_type }}</td>
-                <td>{% if s.sheet_music.is_empty() %}—{% else %}{{ s.sheet_music }}{% endif %}</td>
-                <td>{% if s.artist_names.is_empty() %}—{% else %}{{ s.artist_names }}{% endif %}</td>
+                <td><strong>{{ s.title }}</strong></td>
+                <td>{% if s.album_title.is_empty() %}<span class="text-muted">—</span>{% else %}{{ s.album_title }}{% endif %}</td>
+                <td><span class="song-type-badge badge-{{ s.song_type }}">{{ s.song_type }}</span></td>
+                <td>{% if s.sheet_music.is_empty() %}<span class="text-muted">—</span>{% else %}<code>{{ s.sheet_music }}</code>{% endif %}</td>
+                <td>{% if s.artist_names.is_empty() %}<span class="text-muted">—</span>{% else %}{{ s.artist_names }}{% endif %}</td>
                 <td class="actions">
-                    <a href="/songs/{{ s.id }}/edit?return_to=/" class="btn btn-sm">Edit</a>
+                    <a href="/songs/{{ s.id }}/edit?return_to=/" class="btn btn-sm">✏️ Edit</a>
                     <form method="post" action="/songs/{{ s.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this song?')">🗑️ Delete</button>
                     </form>
                 </td>
             </tr>

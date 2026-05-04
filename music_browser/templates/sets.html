@@ -3,31 +3,34 @@
 {% block content %}
 <div class="page-header">
     <h2>🎤 Live Sets</h2>
-    <a href="/sets/new" class="btn">+ New Set</a>
+    <a href="/sets/new" class="btn btn-primary">+ New Set</a>
 </div>
 
 {% if sets.is_empty() %}
-    <p class="empty">No sets yet. <a href="/sets/new" style="color:var(--accent)">Create one?</a></p>
+    <div class="empty">
+        <p>🎤 No sets yet. Create one to get started!</p>
+        <a href="/sets/new" class="btn btn-primary" style="margin-top:1rem;">+ Create Your First Set</a>
+    </div>
 {% else %}
 
 {% for set in sets %}
-<div class="card" style="margin-bottom:1.5rem;">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3>
+<div class="card" style="margin-bottom:1.5rem;box-shadow:var(--shadow);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem;">
+        <h3 style="font-size:1.25rem;">
             {% if set.set_type == "live" %}🎤{% else if set.set_type == "album_practice" %}💿{% else %}🎶{% endif %}
             {{ set.name }}
-            <span class="text-muted" style="font-size:.8em">({{ set.set_type }})</span>
+            <span class="song-type-badge" style="background:rgba(255,255,255,.1);color:var(--text-muted);">{{ set.set_type }}</span>
         </h3>
         <form method="post" action="/sets/{{ set.id }}/delete" style="margin:0">
-            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this set?')">🗑</button>
+            <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this set?')">🗑️ Delete</button>
         </form>
     </div>
 
     {% if !set.description.is_empty() %}
-        <p class="text-muted">{{ set.description }}</p>
+        <p class="text-muted" style="margin-bottom:1rem;">{{ set.description }}</p>
     {% endif %}
 
-    <div style="display:flex;gap:1.5rem;margin:.5rem 0;">
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0;">
         <span class="meta-tag">🎯 Target: {{ set.target_duration_seconds / 60 }}m {{ set.target_duration_seconds % 60 }}s</span>
         <span class="meta-tag">⏱️ Actual: {{ set.actual_duration_seconds / 60 }}m {{ set.actual_duration_seconds % 60 }}s</span>
         {% if set.target_duration_seconds > 0 %}
@@ -37,7 +40,7 @@
     </div>
 
     {% if !set.songs.is_empty() %}
-    <table class="practice-table" style="margin-top:.75rem;">
+    <table class="practice-table" style="margin-top:1rem;">
         <thead>
             <tr>
                 <th>#</th>
@@ -51,14 +54,14 @@
         <tbody>
         {% for ls in set.songs %}
             <tr>
-                <td>{{ ls.sort_order }}</td>
+                <td><strong>{{ ls.sort_order }}</strong></td>
                 <td><strong>{{ ls.song_title }}</strong></td>
                 <td>{{ ls.duration_seconds / 60 }}:{{ "{:02}"|format(ls.duration_seconds % 60) }}</td>
                 <td>{% if !ls.backing_track_path.is_empty() %}<code>{{ ls.backing_track_path }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>{% if !ls.transition_notes.is_empty() %}{{ ls.transition_notes }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>
                     <form method="post" action="/sets/songs/{{ ls.id }}/remove" style="margin:0">
-                        <button type="submit" class="btn btn-danger btn-sm">✕</button>
+                        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Remove this song from the set?')">✕</button>
                     </form>
                 </td>
             </tr>
@@ -66,37 +69,38 @@
         </tbody>
     </table>
     {% else %}
-        <p class="count">No songs in this set yet.</p>
+        <p class="count" style="padding:1rem 0;">No songs in this set yet.</p>
     {% endif %}
 
-    <details style="margin-top:.75rem;">
-        <summary style="cursor:pointer;color:var(--accent);">+ Add song to set</summary>
-        <form method="post" action="/sets/{{ set.id }}/songs" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;align-items:end;">
-            <label>
-                Song
-                <select name="song_id" required>
+    <details style="margin-top:1rem;">
+        <summary style="cursor:pointer;color:var(--accent);font-weight:500;padding:.5rem 0;list-style:none;">+ Add song to set</summary>
+        <summary style="list-style:none;"></summary>
+        <form method="post" action="/sets/{{ set.id }}/songs" style="display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.75rem;align-items:end;padding:1rem;background:var(--bg);border-radius:var(--radius);">
+            <div style="flex:1;min-width:200px;">
+                <label style="display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.35rem;">Song</label>
+                <select name="song_id" required style="width:100%;padding:.6rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
                     {% for s in songs %}
                     <option value="{{ s.id }}">{{ s.title }}</option>
                     {% endfor %}
                 </select>
-            </label>
-            <label>
-                Order
-                <input type="number" name="sort_order" value="{{ set.songs.len() }}" style="width:4rem">
-            </label>
-            <label>
-                Duration (sec)
-                <input type="number" name="duration_seconds" value="180" style="width:5rem">
-            </label>
-            <label>
-                Backing Track
-                <input type="text" name="backing_track_path" placeholder="/path/to/track.wav">
-            </label>
-            <label>
-                Transition Notes
-                <input type="text" name="transition_notes" placeholder="crossfade, key change...">
-            </label>
-            <button type="submit" class="btn">Add</button>
+            </div>
+            <div>
+                <label style="display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.35rem;">Order</label>
+                <input type="number" name="sort_order" value="{{ set.songs.len() }}" style="width:4rem;padding:.6rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+            </div>
+            <div>
+                <label style="display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.35rem;">Duration (sec)</label>
+                <input type="number" name="duration_seconds" value="180" style="width:5rem;padding:.6rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+            </div>
+            <div style="flex:1;min-width:200px;">
+                <label style="display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.35rem;">Backing Track</label>
+                <input type="text" name="backing_track_path" placeholder="/path/to/track.wav" style="width:100%;padding:.6rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+            </div>
+            <div style="flex:1;min-width:200px;">
+                <label style="display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.35rem;">Transition Notes</label>
+                <input type="text" name="transition_notes" placeholder="crossfade, key change..." style="width:100%;padding:.6rem .8rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+            </div>
+            <button type="submit" class="btn btn-primary">Add</button>
         </form>
     </details>
 </div>
