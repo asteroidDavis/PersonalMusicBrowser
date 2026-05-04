@@ -8,23 +8,36 @@
 {% if instruments.is_empty() %}
     <p class="empty">No instruments yet.</p>
 {% else %}
-    <table>
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="instrument-search" placeholder="🔍 Search instruments..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ instruments.len() }} instruments</span>
+    </div>
+    <table id="instruments-table">
         <thead>
             <tr><th>Name</th><th>Type</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for i in instruments %}
             <tr>
-                <td>{{ i.name }}</td>
-                <td>{{ i.instrument_type }}</td>
+                <td><strong>{{ i.name }}</strong></td>
+                <td><span class="meta-tag">{{ i.instrument_type }}</span></td>
                 <td class="actions">
-                    <form method="post" action="/instruments/{{ i.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    <form method="post" action="/instruments/{{ i.id }}/delete" style="display:inline"
+                          onsubmit="return confirm('Delete this instrument?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
+<script>
+document.getElementById('instrument-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#instruments-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

@@ -38,8 +38,32 @@
         <label for="notes">Notes</label>
         <textarea id="notes" name="notes" rows="3">{{ profile.notes }}</textarea>
     </div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;">
+        <span class="text-muted" style="font-size:.9rem;">Total session time:</span>
+        <span id="total-time" style="font-weight:700;font-size:1.1rem;color:var(--accent);">—</span>
+    </div>
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save Profile</button>
     </div>
 </form>
+<script>
+(function() {
+    const fields = ['warmup_minutes','drill_minutes','song_minutes','review_minutes'];
+    const totalEl = document.getElementById('total-time');
+    function updateTotal() {
+        let sum = 0;
+        fields.forEach(id => {
+            const v = parseInt(document.getElementById(id)?.value, 10);
+            if (!isNaN(v)) sum += v;
+        });
+        const h = Math.floor(sum / 60);
+        const m = sum % 60;
+        totalEl.textContent = (h > 0 ? h + 'h ' : '') + m + 'm';
+    }
+    fields.forEach(id => {
+        document.getElementById(id)?.addEventListener('input', updateTotal);
+    });
+    updateTotal();
+})();
+</script>
 {% endblock %}

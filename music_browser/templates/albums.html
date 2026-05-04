@@ -8,24 +8,37 @@
 {% if albums.is_empty() %}
     <p class="empty">No albums yet.</p>
 {% else %}
-    <table>
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="album-search" placeholder="🔍 Search albums..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ albums.len() }} albums</span>
+    </div>
+    <table id="albums-table">
         <thead>
             <tr><th>Title</th><th>Released</th><th>URL</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for a in albums %}
             <tr>
-                <td>{{ a.title }}</td>
-                <td>{% if a.released %}✓{% else %}✗{% endif %}</td>
-                <td>{% if a.url.is_empty() %}—{% else %}<a href="{{ a.url }}" style="color:var(--accent)">{{ a.url }}</a>{% endif %}</td>
+                <td><strong>{{ a.title }}</strong></td>
+                <td>{% if a.released %}<span style="color:var(--prac-accent)">✓</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{% if a.url.is_empty() %}<span class="text-muted">—</span>{% else %}<a href="{{ a.url }}" target="_blank" style="color:var(--accent);font-size:.85rem;word-break:break-all;">{{ a.url }}</a>{% endif %}</td>
                 <td class="actions">
-                    <form method="post" action="/albums/{{ a.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    <form method="post" action="/albums/{{ a.id }}/delete" style="display:inline"
+                          onsubmit="return confirm('Delete this album?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
+<script>
+document.getElementById('album-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#albums-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

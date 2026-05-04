@@ -9,20 +9,25 @@
 {% if goals.is_empty() %}
 <p class="text-muted">No goals yet. Set 5-year, 1-year, 6-week, and 1-week goals to guide your practice and production.</p>
 {% else %}
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="goal-search" placeholder="🔍 Search goals..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ goals.len() }} goals</span>
+    </div>
 
 {% let current_horizon = String::new() %}
 {% for goal in goals %}
     {% if goal.horizon != current_horizon %}
         {% if !current_horizon.is_empty() %}</div>{% endif %}
-        <div class="goal-horizon-section">
+        <div class="goal-horizon-section" data-horizon="{{ goal.horizon }}">
         <h3 class="goal-horizon-title">
             {% if goal.horizon == "5_year" %}🔭 5-Year Goals
             {% else if goal.horizon == "1_year" %}📅 1-Year Goals
             {% else if goal.horizon == "6_week" %}🗓️ 6-Week Goals
             {% else %}📋 1-Week Goals{% endif %}
+            <span class="horizon-count text-muted" style="font-size:.75rem;font-weight:400;margin-left:.5rem;"></span>
         </h3>
     {% endif %}
-    <div class="goal-card {% if goal.completed %}goal-completed{% endif %}">
+    <div class="goal-card {% if goal.completed %}goal-completed{% endif %}" data-goal-title="{{ goal.title }}" data-goal-completed="{% if goal.completed %}1{% else %}0{% endif %}">
         <div class="goal-card-main">
             <form method="post" action="/goals/{{ goal.id }}/toggle" style="display:inline;">
                 <button type="submit" class="btn-check" title="Toggle completion">
@@ -47,6 +52,33 @@
     </div>
 {% endfor %}
 </div>
+
+<script>
+document.getElementById('goal-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('.goal-card').forEach(card => {
+        const visible = card.textContent.toLowerCase().includes(q);
+        card.style.display = visible ? '' : 'none';
+    });
+    // hide empty horizon sections
+    document.querySelectorAll('.goal-horizon-section').forEach(section => {
+        const visibleCards = section.querySelectorAll('.goal-card');
+        const anyVisible = Array.from(visibleCards).some(c => c.style.display !== 'none');
+        section.style.display = anyVisible ? '' : 'none';
+    });
+});
+
+// Update per-horizon completion counts
+(function() {
+    document.querySelectorAll('.goal-horizon-section').forEach(section => {
+        const cards = section.querySelectorAll('.goal-card');
+        const total = cards.length;
+        const done = Array.from(cards).filter(c => c.dataset.goalCompleted === '1').length;
+        const el = section.querySelector('.horizon-count');
+        if (el) el.textContent = `(${done}/${total} done)`;
+    });
+})();
+</script>
 {% endif %}
 
 <style>

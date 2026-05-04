@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
     <h2>🎤 Live Sets</h2>
-    <a href="/sets/new" class="btn">+ New Set</a>
+    <a href="/sets/new" class="btn btn-primary">+ New Set</a>
 </div>
 
 {% if sets.is_empty() %}
@@ -27,7 +27,7 @@
         <p class="text-muted">{{ set.description }}</p>
     {% endif %}
 
-    <div style="display:flex;gap:1.5rem;margin:.5rem 0;">
+    <div style="display:flex;gap:1.5rem;margin:.5rem 0;flex-wrap:wrap;align-items:center;">
         <span class="meta-tag">🎯 Target: {{ set.target_duration_seconds / 60 }}m {{ set.target_duration_seconds % 60 }}s</span>
         <span class="meta-tag">⏱️ Actual: {{ set.actual_duration_seconds / 60 }}m {{ set.actual_duration_seconds % 60 }}s</span>
         {% if set.target_duration_seconds > 0 %}
@@ -35,6 +35,12 @@
             <span class="meta-tag {% if pct > 100 %}text-danger{% endif %}">📊 {{ pct }}%</span>
         {% endif %}
     </div>
+    {% if set.target_duration_seconds > 0 %}
+    {% let pct = (set.actual_duration_seconds * 100) / set.target_duration_seconds %}
+    <div style="width:100%;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:.5rem;">
+        <div style="width:{{ pct.min(100) }}%;height:100%;background:{% if pct > 100 %}var(--danger){% else if pct > 80 %}var(--prac-accent){% else %}var(--accent){% endif %};transition:width .3s;"></div>
+    </div>
+    {% endif %}
 
     {% if !set.songs.is_empty() %}
     <table class="practice-table" style="margin-top:.75rem;">
@@ -54,10 +60,11 @@
                 <td>{{ ls.sort_order }}</td>
                 <td><strong>{{ ls.song_title }}</strong></td>
                 <td>{{ ls.duration_seconds / 60 }}:{{ "{:02}"|format(ls.duration_seconds % 60) }}</td>
-                <td>{% if !ls.backing_track_path.is_empty() %}<code>{{ ls.backing_track_path }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{% if !ls.backing_track_path.is_empty() %}<code style="font-size:.8rem;word-break:break-all;">{{ ls.backing_track_path }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>{% if !ls.transition_notes.is_empty() %}{{ ls.transition_notes }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>
-                    <form method="post" action="/sets/songs/{{ ls.id }}/remove" style="margin:0">
+                    <form method="post" action="/sets/songs/{{ ls.id }}/remove" style="margin:0"
+                          onsubmit="return confirm('Remove this song from the set?')">
                         <button type="submit" class="btn btn-danger btn-sm">✕</button>
                     </form>
                 </td>

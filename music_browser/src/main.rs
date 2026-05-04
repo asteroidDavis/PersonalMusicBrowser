@@ -155,7 +155,7 @@ struct RecordingsTemplate {
 struct RecordingView {
     id: i64,
     recording_type: String,
-    song_id: i64,
+    song_title: String,
     path: String,
     instrument_names: String,
 }
@@ -834,12 +834,20 @@ async fn recording_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpRe
     let recordings = queries::list_recordings(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    let songs = queries::list_songs(&pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let song_titles: std::collections::HashMap<i64, String> =
+        songs.into_iter().map(|s| (s.id, s.title)).collect();
     let views: Vec<RecordingView> = recordings
         .into_iter()
         .map(|r| RecordingView {
             id: r.id,
             recording_type: r.recording_type.to_string(),
-            song_id: r.song_id,
+            song_title: song_titles
+                .get(&r.song_id)
+                .cloned()
+                .unwrap_or_else(|| format!("Song #{}", r.song_id)),
             path: r.path,
             instrument_names: r
                 .instruments

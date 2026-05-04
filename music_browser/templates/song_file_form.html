@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Add Song File — Personal Music Browser{% endblock %}
 {% block content %}
-<h2>Add File for "{{ song_title }}"</h2>
+<div class="page-header">
+    <h2>📁 Add File for "{{ song_title }}"</h2>
+</div>
 <form class="form" method="post">
     <input type="hidden" name="return_to" value="{{ return_to }}">
     <div class="form-group">

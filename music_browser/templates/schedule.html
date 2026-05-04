@@ -33,6 +33,14 @@
         if (d && !d.value) {
             d.value = new Date().toISOString().split('T')[0];
         }
+        // Highlight today's events
+        const today = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('.schedule-event').forEach(el => {
+            const dateEl = el.querySelector('.schedule-date');
+            if (dateEl && dateEl.textContent.trim() === today) {
+                el.classList.add('is-today');
+            }
+        });
     });
 </script>
 
@@ -107,9 +115,27 @@
 .event-status-in_progress { background:#f59e0b22; color:#d97706; }
 .event-status-completed { background:#10b98122; color:#059669; }
 .event-status-skipped { background:#ef444422; color:#ef4444; }
+.schedule-event.is-today { border-left:3px solid var(--accent); }
+.schedule-event.is-today .schedule-date { color:var(--accent); }
 @media print {
     form, .btn, #gen-form { display:none !important; }
     .schedule-event { break-inside:avoid; page-break-inside:avoid; }
 }
 </style>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var d = document.getElementById('start_date');
+        if (d && !d.value) {
+            d.value = new Date().toISOString().split('T')[0];
+        }
+        // Highlight today's events
+        var today = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('.schedule-event').forEach(function(event) {
+            var dateEl = event.querySelector('.schedule-date');
+            if (dateEl && dateEl.textContent.trim() === today) {
+                event.classList.add('is-today');
+            }
+        });
+    });
+</script>
 {% endblock %}

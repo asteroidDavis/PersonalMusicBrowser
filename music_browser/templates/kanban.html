@@ -36,8 +36,8 @@
                     {% if !song.export_folder.is_empty() %}<span class="meta-tag">📦 Export</span>{% endif %}
                 </div>
                 {% endif %}
-                <form method="post" action="/workflow/songs/{{ song.id }}/state" class="kanban-card-form">
-                    <select name="workflow_state" class="status-select" onchange="this.form.submit()">
+                <form method="post" action="/workflow/songs/{{ song.id }}/state" class="kanban-card-form" data-state-form>
+                    <select name="workflow_state" class="status-select">
                     {% for s in all_states %}
                         <option value="{{ s.0 }}"{% if s.0 == col.state %} selected{% endif %}>{{ s.1 }}</option>
                     {% endfor %}
@@ -65,6 +65,46 @@ async function handleDrop(event, targetState) {
     } catch (e) {
         console.error('Failed to update workflow state', e);
     }
+}
+
+// Handle state-select changes via fetch (no page reload)
+document.querySelectorAll('form[data-state-form]').forEach(form => {
+    const sel = form.querySelector('select');
+    if (!sel) return;
+    sel.addEventListener('change', async () => {
+        const data = new FormData(form);
+        try {
+            const r = await fetch(form.action, { method: 'POST', body: new URLSearchParams(data) });
+            if (r.ok) {
+                // show a tiny toast instead of reloading
+                showToast('State updated ✓');
+            } else {
+                showToast('Update failed', true);
+                // revert selection
+                sel.value = sel.dataset.lastValue || '';
+            }
+        } catch (e) {
+            showToast('Network error', true);
+            sel.value = sel.dataset.lastValue || '';
+        }
+    });
+    sel.dataset.lastValue = sel.value;
+});
+
+function showToast(msg, isError) {
+    let t = document.getElementById('kanban-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'kanban-toast';
+        t.style.cssText = 'position:fixed;bottom:1rem;right:1rem;padding:.6rem 1rem;border-radius:var(--radius);font-size:.85rem;z-index:1000;transition:opacity .3s;opacity:0;pointer-events:none;';
+        document.body.appendChild(t);
+    }
+    t.style.background = isError ? 'var(--danger)' : 'var(--prac-accent)';
+    t.style.color = '#fff';
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._hide);
+    t._hide = setTimeout(() => { t.style.opacity = '0'; }, 2000);
 }
 </script>
 

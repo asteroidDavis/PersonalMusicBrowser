@@ -8,23 +8,36 @@
 {% if artists.is_empty() %}
     <p class="empty">No artists yet.</p>
 {% else %}
-    <table>
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="artist-search" placeholder="🔍 Search artists..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ artists.len() }} artists</span>
+    </div>
+    <table id="artists-table">
         <thead>
             <tr><th>Name</th><th>Bands</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for a in artists %}
             <tr>
-                <td>{{ a.name }}</td>
-                <td>{% if a.band_names.is_empty() %}—{% else %}{{ a.band_names }}{% endif %}</td>
+                <td><strong>{{ a.name }}</strong></td>
+                <td>{% if a.band_names.is_empty() %}<span class="text-muted">—</span>{% else %}{{ a.band_names }}{% endif %}</td>
                 <td class="actions">
-                    <form method="post" action="/artists/{{ a.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    <form method="post" action="/artists/{{ a.id }}/delete" style="display:inline"
+                          onsubmit="return confirm('Delete this artist?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
+<script>
+document.getElementById('artist-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#artists-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

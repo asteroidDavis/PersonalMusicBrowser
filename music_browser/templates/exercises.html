@@ -9,39 +9,51 @@
 {% if exercises.is_empty() %}
 <p class="text-muted">No exercises yet. Add warmups, scales, and technique drills to include in your practice schedule.</p>
 {% else %}
-<table>
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Category</th>
-            <th>Instrument</th>
-            <th>Source</th>
-            <th>Order</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for ex in exercises %}
-        <tr>
-            <td>
-                <strong>{{ ex.name }}</strong>
-                {% if !ex.description.is_empty() %}
-                <br><span class="text-muted" style="font-size:.8rem;">{{ ex.description }}</span>
-                {% endif %}
-            </td>
-            <td><span class="meta-tag">{{ ex.category }}</span></td>
-            <td>{% if !ex.instrument_name.is_empty() %}{{ ex.instrument_name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-            <td>{% if !ex.source.is_empty() %}{{ ex.source }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-            <td>{{ ex.sort_order }}</td>
-            <td>
-                <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline;"
-                      onsubmit="return confirm('Delete this exercise?')">
-                    <button type="submit" class="btn btn-sm btn-danger">🗑</button>
-                </form>
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="exercise-search" placeholder="🔍 Search exercises..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ exercises.len() }} exercises</span>
+    </div>
+    <table id="exercises-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Instrument</th>
+                <th>Source</th>
+                <th>Order</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for ex in exercises %}
+            <tr>
+                <td>
+                    <strong>{{ ex.name }}</strong>
+                    {% if !ex.description.is_empty() %}
+                    <br><span class="text-muted" style="font-size:.8rem;">{{ ex.description }}</span>
+                    {% endif %}
+                </td>
+                <td><span class="meta-tag">{{ ex.category }}</span></td>
+                <td>{% if !ex.instrument_name.is_empty() %}{{ ex.instrument_name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{% if !ex.source.is_empty() %}{{ ex.source }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{{ ex.sort_order }}</td>
+                <td>
+                    <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline;"
+                          onsubmit="return confirm('Delete this exercise?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+<script>
+document.getElementById('exercise-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#exercises-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

@@ -38,6 +38,13 @@
         </div>
     </div>
 
+    {# Quick action links #}
+    <div style="display:flex;gap:.4rem;margin:.25rem 0 .5rem;flex-wrap:wrap;">
+        <a href="/songs/{{ entry.song_id }}/edit?return_to=/practice" class="btn btn-sm">✏️ Edit Song</a>
+        <a href="/production" class="btn btn-sm" style="color:var(--prod-accent)">🎛️ Production</a>
+        {% if !entry.score_url.is_empty() %}<a href="{{ entry.score_url }}" target="_blank" class="btn btn-sm" style="color:var(--prac-accent)">📄 Open Score</a>{% endif %}
+    </div>
+
     {# Priority ranking #}
     <div style="display:flex;align-items:center;gap:.75rem;margin:.5rem 0;">
         <form method="post" action="/practice/songs/{{ entry.song_id }}/priority" style="display:flex;align-items:center;gap:.4rem;margin:0;">
@@ -120,15 +127,40 @@
         <div class="file-grid">
         {% for f in entry.files %}
             <div class="file-card">
-                <span class="file-type-badge">{{ f.file_type }}</span>
-                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
+                <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;">
+                    <span class="file-type-badge">{{ f.file_type }}</span>
+                    {% if f.path.starts_with("http") %}
+                        <a href="{{ f.path }}" target="_blank" style="color:var(--accent);font-size:.85rem;word-break:break-all;">{{ f.path }}</a>
+                    {% else %}
+                        <code style="font-size:.8rem;word-break:break-all;">{{ f.path }}</code>
+                        <button type="button" class="btn btn-sm" style="font-size:.7rem;padding:.1rem .3rem;" onclick="navigator.clipboard.writeText('{{ f.path|escape }}').then(()=>this.textContent='Copied!')" title="Copy path">📋</button>
+                    {% endif %}
+                </div>
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
-                {% if !f.description.is_empty() %}<p class="text-muted">{{ f.description }}</p>{% endif %}
+                {% if !f.description.is_empty() %}<p class="text-muted" style="margin-top:.25rem;">{{ f.description }}</p>{% endif %}
             </div>
         {% endfor %}
         </div>
     </div>
     {% endif %}
+
+    {# Practice Journal — client-side notes per song #}
+    <details style="margin-top:.75rem;background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;border:1px solid var(--border);">
+        <summary style="cursor:pointer;font-size:.9rem;font-weight:600;color:var(--prac-accent);">📝 Practice Journal</summary>
+        <div style="margin-top:.5rem;">
+            <textarea
+                class="practice-journal"
+                data-song-id="{{ entry.song_id }}"
+                placeholder="What to focus on, how it went, what to improve next session..."
+                rows="3"
+                style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:.5rem;font-size:.9rem;resize:vertical;"
+            ></textarea>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.25rem;">
+                <span class="text-muted" style="font-size:.75rem;">Auto-saved locally</span>
+                <span class="journal-save-status text-muted" style="font-size:.75rem;opacity:0;transition:opacity .3s;">Saved ✓</span>
+            </div>
+        </div>
+    </details>
 </div>
 {% endfor %}
 
@@ -166,5 +198,30 @@ document.querySelectorAll('form[action*="/practice/songs/"][action$="/priority"]
         });
     });
 });
+
+// Practice Journal — localStorage persistence
+(function() {
+    const PREFIX = 'pb_journal_';
+    document.querySelectorAll('.practice-journal').forEach(ta => {
+        const songId = ta.dataset.songId;
+        const key = PREFIX + songId;
+        // hydrate
+        const saved = localStorage.getItem(key);
+        if (saved) ta.value = saved;
+        // save on input (debounced)
+        let timeout;
+        const statusEl = ta.closest('details').querySelector('.journal-save-status');
+        ta.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                localStorage.setItem(key, ta.value);
+                if (statusEl) {
+                    statusEl.style.opacity = '1';
+                    setTimeout(() => { statusEl.style.opacity = '0'; }, 1200);
+                }
+            }, 400);
+        });
+    });
+})();
 </script>
 {% endblock %}
