@@ -75,8 +75,27 @@
                 <span class="schedule-item-duration">{{ item.duration_minutes }}min</span>
             </div>
             <div class="schedule-item-meta">
-                {% if !item.song_title.is_empty() %}<span class="meta-tag">🎵 {{ item.song_title }}</span>{% endif %}
-                {% if !item.exercise_name.is_empty() %}<span class="meta-tag">🏋️ {{ item.exercise_name }}</span>{% endif %}
+                {% if !item.song_title.is_empty() %}
+                    <span class="meta-tag" style="display:inline-flex;align-items:center;gap:.3rem;">
+                        🎵 {{ item.song_title }}
+                        {% match item.song_id %}
+                            {% when Some with (id) %}
+                            <a href="/practice#song-{{ id }}" target="_blank" title="Practice View" style="text-decoration:none;">🎸</a>
+                            <a href="/production#song-{{ id }}" target="_blank" title="Production View" style="text-decoration:none;">🎛️</a>
+                            {% when None %}
+                        {% endmatch %}
+                    </span>
+                {% endif %}
+                {% if !item.exercise_name.is_empty() %}
+                    <span class="meta-tag" style="display:inline-flex;align-items:center;gap:.3rem;">
+                        🏋️ {{ item.exercise_name }}
+                        {% match item.exercise_id %}
+                            {% when Some with (id) %}
+                            <a href="/exercises" target="_blank" title="Exercises View" style="text-decoration:none;">🔗</a>
+                            {% when None %}
+                        {% endmatch %}
+                    </span>
+                {% endif %}
                 {% if !item.instrument_name.is_empty() %}<span class="meta-tag">🎸 {{ item.instrument_name }}</span>{% endif %}
                 {% if !item.stage_name.is_empty() %}<span class="meta-tag">🎛️ {{ item.stage_name }}</span>{% endif %}
             </div>

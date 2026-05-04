@@ -32,7 +32,7 @@
 {% else %}
 
 {% for entry in songs %}
-<details class="prod-card" data-song-type="{{ entry.song_type }}">
+<details class="prod-card" id="song-{{ entry.song_id }}" data-song-type="{{ entry.song_type }}">
     <summary class="prod-card-header" style="cursor:pointer;list-style:none;">
         <h3>
             <span style="font-size:.8em;opacity:.5;">▶</span>
@@ -175,6 +175,14 @@ function reloadAtScroll() {
     location.reload();
 }
 
+window.addEventListener('beforeunload', () => {
+    const openIds = [];
+    document.querySelectorAll('details.prod-card').forEach((details, index) => {
+        if (details.open) openIds.push(index);
+    });
+    sessionStorage.setItem('prodOpenCards', JSON.stringify(openIds));
+});
+
 document.querySelectorAll('.inline-form select').forEach(sel => {
     sel.removeAttribute('onchange');
     sel.addEventListener('change', () => postForm(sel.form).then(reloadAtScroll));
@@ -207,6 +215,18 @@ const savedY = sessionStorage.getItem('prodScrollY');
 if (savedY !== null) {
     sessionStorage.removeItem('prodScrollY');
     window.scrollTo(0, parseInt(savedY, 10));
+}
+
+const savedOpen = sessionStorage.getItem('prodOpenCards');
+if (savedOpen) {
+    sessionStorage.removeItem('prodOpenCards');
+    try {
+        const openIds = JSON.parse(savedOpen);
+        const cards = document.querySelectorAll('details.prod-card');
+        openIds.forEach(index => {
+            if (cards[index]) cards[index].open = true;
+        });
+    } catch(e) {}
 }
 </script>
 {% endblock %}

@@ -22,7 +22,7 @@
 {% else %}
 
 {% for entry in songs %}
-<div class="practice-card" data-song-type="{{ entry.song_type }}">
+<div class="practice-card" id="song-{{ entry.song_id }}" data-song-type="{{ entry.song_type }}">
     <div class="practice-card-header">
         <h3>
             <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
@@ -143,24 +143,6 @@
         </div>
     </div>
     {% endif %}
-
-    {# Practice Journal — client-side notes per song #}
-    <details style="margin-top:.75rem;background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;border:1px solid var(--border);">
-        <summary style="cursor:pointer;font-size:.9rem;font-weight:600;color:var(--prac-accent);">📝 Practice Journal</summary>
-        <div style="margin-top:.5rem;">
-            <textarea
-                class="practice-journal"
-                data-song-id="{{ entry.song_id }}"
-                placeholder="What to focus on, how it went, what to improve next session..."
-                rows="3"
-                style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:.5rem;font-size:.9rem;resize:vertical;"
-            ></textarea>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.25rem;">
-                <span class="text-muted" style="font-size:.75rem;">Auto-saved locally</span>
-                <span class="journal-save-status text-muted" style="font-size:.75rem;opacity:0;transition:opacity .3s;">Saved ✓</span>
-            </div>
-        </div>
-    </details>
 </div>
 {% endfor %}
 
@@ -198,30 +180,5 @@ document.querySelectorAll('form[action*="/practice/songs/"][action$="/priority"]
         });
     });
 });
-
-// Practice Journal — localStorage persistence
-(function() {
-    const PREFIX = 'pb_journal_';
-    document.querySelectorAll('.practice-journal').forEach(ta => {
-        const songId = ta.dataset.songId;
-        const key = PREFIX + songId;
-        // hydrate
-        const saved = localStorage.getItem(key);
-        if (saved) ta.value = saved;
-        // save on input (debounced)
-        let timeout;
-        const statusEl = ta.closest('details').querySelector('.journal-save-status');
-        ta.addEventListener('input', () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                localStorage.setItem(key, ta.value);
-                if (statusEl) {
-                    statusEl.style.opacity = '1';
-                    setTimeout(() => { statusEl.style.opacity = '0'; }, 1200);
-                }
-            }, 400);
-        });
-    });
-})();
 </script>
 {% endblock %}
