@@ -424,6 +424,24 @@ struct SongFileFormData {
 }
 
 // ---------------------------------------------------------------------------
+// Utility Functions
+// ---------------------------------------------------------------------------
+
+/// Validates that a redirect URL is safe (local path only, not external)
+fn is_safe_redirect(url: &str) -> bool {
+    if url.is_empty() {
+        return true;
+    }
+    // Only allow relative paths or paths starting with /
+    if url.starts_with('/') && !url.starts_with("//") {
+        // Ensure no protocol injection (e.g., /\\evil.com or /\evil.com)
+        !url.contains("://") && !url.contains("\\")
+    } else {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Handlers — Songs
 // ---------------------------------------------------------------------------
 
@@ -616,7 +634,7 @@ async fn song_update(
     queries::update_song(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let loc = if form.return_to.is_empty() {
+    let loc = if form.return_to.is_empty() || !is_safe_redirect(&form.return_to) {
         "/".to_string()
     } else {
         form.return_to.clone()
@@ -1154,7 +1172,7 @@ async fn song_file_create(
     queries::create_song_file(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let loc = if form.return_to.is_empty() {
+    let loc = if form.return_to.is_empty() || !is_safe_redirect(&form.return_to) {
         "/production".to_string()
     } else {
         form.return_to.clone()

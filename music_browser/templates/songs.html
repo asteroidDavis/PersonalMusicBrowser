@@ -14,11 +14,12 @@
     <p class="count">Found {{ songs.len() }} songs</p>
     <table>
         <thead>
-            <tr><th>Title</th><th>Album</th><th>Type</th><th>Sheet Music</th><th>Artists</th><th>Actions</th></tr>
+            <tr><th>ID</th><th>Title</th><th>Album</th><th>Type</th><th>Sheet Music</th><th>Artists</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for s in songs %}
             <tr>
+                <td><span class="text-muted" style="font-family:monospace;font-size:.85rem;">#{{ s.id }}</span></td>
                 <td><strong>{{ s.title }}</strong></td>
                 <td>{% if s.album_title.is_empty() %}<span class="text-muted">—</span>{% else %}{{ s.album_title }}{% endif %}</td>
                 <td><span class="song-type-badge badge-{{ s.song_type }}">{{ s.song_type }}</span></td>
