@@ -33,6 +33,14 @@
         if (d && !d.value) {
             d.value = new Date().toISOString().split('T')[0];
         }
+        // Highlight today's events
+        const today = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('.schedule-event').forEach(el => {
+            const dateEl = el.querySelector('.schedule-date');
+            if (dateEl && dateEl.textContent.trim() === today) {
+                el.classList.add('is-today');
+            }
+        });
     });
 </script>
 
@@ -67,8 +75,27 @@
                 <span class="schedule-item-duration">{{ item.duration_minutes }}min</span>
             </div>
             <div class="schedule-item-meta">
-                {% if !item.song_title.is_empty() %}<span class="meta-tag">🎵 {{ item.song_title }}</span>{% endif %}
-                {% if !item.exercise_name.is_empty() %}<span class="meta-tag">🏋️ {{ item.exercise_name }}</span>{% endif %}
+                {% if !item.song_title.is_empty() %}
+                    <span class="meta-tag" style="display:inline-flex;align-items:center;gap:.3rem;">
+                        🎵 {{ item.song_title }}
+                        {% match item.song_id %}
+                            {% when Some with (id) %}
+                            <a href="/practice#song-{{ id }}" target="_blank" title="Practice View" style="text-decoration:none;">🎸</a>
+                            <a href="/production#song-{{ id }}" target="_blank" title="Production View" style="text-decoration:none;">🎛️</a>
+                            {% when None %}
+                        {% endmatch %}
+                    </span>
+                {% endif %}
+                {% if !item.exercise_name.is_empty() %}
+                    <span class="meta-tag" style="display:inline-flex;align-items:center;gap:.3rem;">
+                        🏋️ {{ item.exercise_name }}
+                        {% match item.exercise_id %}
+                            {% when Some with (id) %}
+                            <a href="/exercises" target="_blank" title="Exercises View" style="text-decoration:none;">🔗</a>
+                            {% when None %}
+                        {% endmatch %}
+                    </span>
+                {% endif %}
                 {% if !item.instrument_name.is_empty() %}<span class="meta-tag">🎸 {{ item.instrument_name }}</span>{% endif %}
                 {% if !item.stage_name.is_empty() %}<span class="meta-tag">🎛️ {{ item.stage_name }}</span>{% endif %}
             </div>
@@ -107,9 +134,27 @@
 .event-status-in_progress { background:#f59e0b22; color:#d97706; }
 .event-status-completed { background:#10b98122; color:#059669; }
 .event-status-skipped { background:#ef444422; color:#ef4444; }
+.schedule-event.is-today { border-left:3px solid var(--accent); }
+.schedule-event.is-today .schedule-date { color:var(--accent); }
 @media print {
     form, .btn, #gen-form { display:none !important; }
     .schedule-event { break-inside:avoid; page-break-inside:avoid; }
 }
 </style>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var d = document.getElementById('start_date');
+        if (d && !d.value) {
+            d.value = new Date().toISOString().split('T')[0];
+        }
+        // Highlight today's events
+        var today = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('.schedule-event').forEach(function(event) {
+            var dateEl = event.querySelector('.schedule-date');
+            if (dateEl && dateEl.textContent.trim() === today) {
+                event.classList.add('is-today');
+            }
+        });
+    });
+</script>
 {% endblock %}

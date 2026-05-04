@@ -14,13 +14,14 @@
         <tbody>
         {% for r in recordings %}
             <tr>
-                <td>{{ r.recording_type }}</td>
-                <td>{{ r.song_id }}</td>
-                <td>{% if r.path.is_empty() %}—{% else %}{{ r.path }}{% endif %}</td>
+                <td><span class="meta-tag">{{ r.recording_type }}</span></td>
+                <td>{{ r.song_title }}</td>
+                <td>{% if r.path.is_empty() %}—{% else %}<code style="font-size:.8rem;">{{ r.path }}</code>{% endif %}</td>
                 <td>{% if r.instrument_names.is_empty() %}—{% else %}{{ r.instrument_names }}{% endif %}</td>
                 <td class="actions">
-                    <form method="post" action="/recordings/{{ r.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    <form method="post" action="/recordings/{{ r.id }}/delete" style="display:inline"
+                          onsubmit="return confirm('Delete this recording?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>
             </tr>

@@ -32,7 +32,7 @@
 {% else %}
 
 {% for entry in songs %}
-<details class="prod-card" data-song-type="{{ entry.song_type }}" open>
+<details class="prod-card" id="song-{{ entry.song_id }}" data-song-type="{{ entry.song_type }}">
     <summary class="prod-card-header" style="cursor:pointer;list-style:none;">
         <h3>
             <span style="font-size:.8em;opacity:.5;">▶</span>
@@ -56,13 +56,13 @@
     </div>
 
     {% if entry.stages.is_empty() %}
-        <p class="count" style="padding:.5rem 0">No production stages defined.
+        <div class="count" style="padding:.5rem 0">No production stages defined.
             <a href="/production/songs/{{ entry.song_id }}/stages/new" style="color:var(--accent)">Add stages?</a>
             or
             <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
                 <button type="submit" class="btn btn-sm" style="font-size:.8em">⚡ Auto-add all 7 stages</button>
             </form>
-        </p>
+        </div>
     {% else %}
     <table class="prod-table">
         <thead>
@@ -130,12 +130,17 @@
         <summary>📁 Files ({{ entry.files.len() }})</summary>
         <ul>
         {% for f in entry.files %}
-            <li>
+            <li style="gap:.35rem;">
                 <span class="file-type">{{ f.file_type }}</span>
-                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
+                {% if f.path.starts_with("http") %}
+                    <a href="{{ f.path }}" target="_blank" style="color:var(--accent);word-break:break-all;font-size:.85rem;">{{ f.path }}</a>
+                {% else %}
+                    <code style="font-size:.8rem;word-break:break-all;">{{ f.path }}</code>
+                    <button type="button" class="btn btn-sm" style="font-size:.65rem;padding:.1rem .3rem;" onclick="navigator.clipboard.writeText('{{ f.path|escape }}').then(()=>this.textContent='Copied!')" title="Copy path">📋</button>
+                {% endif %}
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<span class="text-muted"> — {{ f.description }}</span>{% endif %}
-                <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form">
+                <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form" style="margin-left:auto;">
                     <button class="btn btn-danger btn-sm" style="font-size:.65rem;padding:.1rem .3rem">✕</button>
                 </form>
             </li>
@@ -170,9 +175,17 @@ function reloadAtScroll() {
     location.reload();
 }
 
+window.addEventListener('beforeunload', () => {
+    const openIds = [];
+    document.querySelectorAll('details.prod-card').forEach((details, index) => {
+        if (details.open) openIds.push(index);
+    });
+    sessionStorage.setItem('prodOpenCards', JSON.stringify(openIds));
+});
+
 document.querySelectorAll('.inline-form select').forEach(sel => {
     sel.removeAttribute('onchange');
-    sel.addEventListener('change', () => postForm(sel.form));
+    sel.addEventListener('change', () => postForm(sel.form).then(reloadAtScroll));
 });
 
 document.querySelectorAll('form[action*="/stages/auto"], form[action*="/steps/auto"]').forEach(form => {
@@ -202,6 +215,18 @@ const savedY = sessionStorage.getItem('prodScrollY');
 if (savedY !== null) {
     sessionStorage.removeItem('prodScrollY');
     window.scrollTo(0, parseInt(savedY, 10));
+}
+
+const savedOpen = sessionStorage.getItem('prodOpenCards');
+if (savedOpen) {
+    sessionStorage.removeItem('prodOpenCards');
+    try {
+        const openIds = JSON.parse(savedOpen);
+        const cards = document.querySelectorAll('details.prod-card');
+        openIds.forEach(index => {
+            if (cards[index]) cards[index].open = true;
+        });
+    } catch(e) {}
 }
 </script>
 {% endblock %}

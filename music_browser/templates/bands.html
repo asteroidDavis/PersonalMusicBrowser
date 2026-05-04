@@ -8,22 +8,35 @@
 {% if bands.is_empty() %}
     <p class="empty">No bands yet.</p>
 {% else %}
-    <table>
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <input type="text" id="band-search" placeholder="🔍 Search bands..." style="padding:.5rem .75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;min-width:220px;">
+        <span class="text-muted" style="font-size:.85rem;">{{ bands.len() }} bands</span>
+    </div>
+    <table id="bands-table">
         <thead>
             <tr><th>Name</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for b in bands %}
             <tr>
-                <td>{{ b.name }}</td>
+                <td><strong>{{ b.name }}</strong></td>
                 <td class="actions">
-                    <form method="post" action="/bands/{{ b.id }}/delete" style="display:inline">
-                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                    <form method="post" action="/bands/{{ b.id }}/delete" style="display:inline"
+                          onsubmit="return confirm('Delete this band?')">
+                        <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
+<script>
+document.getElementById('band-search').addEventListener('input', function(e) {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#bands-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

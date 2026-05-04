@@ -22,7 +22,7 @@
 {% else %}
 
 {% for entry in songs %}
-<div class="practice-card" data-song-type="{{ entry.song_type }}">
+<div class="practice-card" id="song-{{ entry.song_id }}" data-song-type="{{ entry.song_type }}">
     <div class="practice-card-header">
         <h3>
             <span class="song-type-badge badge-{{ entry.song_type }}">{{ entry.song_type }}</span>
@@ -36,6 +36,13 @@
             <span class="meta-tag">📋 {{ entry.workflow_state }}</span>
             {% if !entry.score_url.is_empty() %}<a href="{{ entry.score_url }}" target="_blank" class="meta-tag meta-link">📄 Score</a>{% endif %}
         </div>
+    </div>
+
+    {# Quick action links #}
+    <div style="display:flex;gap:.4rem;margin:.25rem 0 .5rem;flex-wrap:wrap;">
+        <a href="/songs/{{ entry.song_id }}/edit?return_to=/practice" class="btn btn-sm">✏️ Edit Song</a>
+        <a href="/production" class="btn btn-sm" style="color:var(--prod-accent)">🎛️ Production</a>
+        {% if !entry.score_url.is_empty() %}<a href="{{ entry.score_url }}" target="_blank" class="btn btn-sm" style="color:var(--prac-accent)">📄 Open Score</a>{% endif %}
     </div>
 
     {# Priority ranking #}
@@ -120,10 +127,17 @@
         <div class="file-grid">
         {% for f in entry.files %}
             <div class="file-card">
-                <span class="file-type-badge">{{ f.file_type }}</span>
-                {% if f.path.starts_with("http") %}<a href="{{ f.path }}" target="_blank" style="color:var(--accent)">{{ f.path }}</a>{% else %}<code>{{ f.path }}</code>{% endif %}
+                <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;">
+                    <span class="file-type-badge">{{ f.file_type }}</span>
+                    {% if f.path.starts_with("http") %}
+                        <a href="{{ f.path }}" target="_blank" style="color:var(--accent);font-size:.85rem;word-break:break-all;">{{ f.path }}</a>
+                    {% else %}
+                        <code style="font-size:.8rem;word-break:break-all;">{{ f.path }}</code>
+                        <button type="button" class="btn btn-sm" style="font-size:.7rem;padding:.1rem .3rem;" onclick="navigator.clipboard.writeText('{{ f.path|escape }}').then(()=>this.textContent='Copied!')" title="Copy path">📋</button>
+                    {% endif %}
+                </div>
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
-                {% if !f.description.is_empty() %}<p class="text-muted">{{ f.description }}</p>{% endif %}
+                {% if !f.description.is_empty() %}<p class="text-muted" style="margin-top:.25rem;">{{ f.description }}</p>{% endif %}
             </div>
         {% endfor %}
         </div>
