@@ -46,7 +46,96 @@
         <button type="submit" class="btn btn-primary">Save Profile</button>
     </div>
 </form>
+
+<div class="page-header" style="margin-top: 2rem;">
+    <h2>📓 Practice Journal</h2>
+</div>
+<div class="form-card">
+    {% if journal_entries.is_empty() %}
+    <p class="text-muted">No journal entries yet. Complete practice items or goals to see them here.</p>
+    {% else %}
+    <table style="width:100%;border-collapse:collapse;">
+        <thead>
+            <tr style="border-bottom:2px solid var(--border);">
+                <th style="text-align:left;padding:.5rem;">Date</th>
+                <th style="text-align:left;padding:.5rem;">Type</th>
+                <th style="text-align:left;padding:.5rem;">Item</th>
+                <th style="text-align:left;padding:.5rem;">Notes</th>
+                <th style="text-align:left;padding:.5rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in journal_entries %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:.5rem;vertical-align:top;white-space:nowrap;">{{ entry.entry_date }}</td>
+                <td style="padding:.5rem;vertical-align:top;">
+                    {% if entry.entry_type == "schedule_item" %}
+                    <span style="background:var(--accent);color:white;padding:.25rem .5rem;border-radius:var(--radius);font-size:.8rem;">Practice</span>
+                    {% else %}
+                    <span style="background:var(--success);color:white;padding:.25rem .5rem;border-radius:var(--radius);font-size:.8rem;">Goal</span>
+                    {% endif %}
+                </td>
+                <td style="padding:.5rem;vertical-align:top;">
+                    {% if entry.entry_type == "schedule_item" %}
+                        {% if !entry.schedule_item_song_title.is_empty() %}
+                        🎵 {{ entry.schedule_item_song_title }}
+                        {% endif %}
+                        {% if !entry.schedule_item_exercise_name.is_empty() %}
+                        🎯 {{ entry.schedule_item_exercise_name }}
+                        {% endif %}
+                        {% if entry.schedule_item_song_title.is_empty() && entry.schedule_item_exercise_name.is_empty() %}
+                        {{ entry.schedule_item_title }}
+                        {% endif %}
+                    {% else %}
+                        🏆 {{ entry.goal_title }}
+                    {% endif %}
+                </td>
+                <td style="padding:.5rem;vertical-align:top;min-width:220px;">
+                    <form method="post" action="/journal/{{ entry.id }}/notes" style="display:flex;flex-direction:column;gap:.25rem;">
+                        <textarea name="notes" maxlength="1020" rows="2"
+                            style="width:100%;resize:vertical;font-size:.85rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);"
+                            oninput="updateCounter(this)"
+                        >{{ entry.notes }}</textarea>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
+                            <span class="text-muted" style="font-size:.75rem;" data-counter>0/1020</span>
+                            <button type="submit" class="btn btn-sm btn-primary" style="padding:.2rem .6rem;font-size:.8rem;">Save</button>
+                        </div>
+                    </form>
+                </td>
+                <td style="padding:.5rem;vertical-align:top;">
+                    <form method="post" action="/journal/{{ entry.id }}/delete" style="display:flex;flex-direction:column;gap:.25rem;">
+                        <button type="submit" class="btn btn-sm btn-danger" style="padding:.2rem .6rem;font-size:.8rem;">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if total_pages > 1 %}
+    <div style="display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:1rem;">
+        {% if current_page > 1 %}
+        <a href="/profile?page={{ current_page - 1 }}" class="btn btn-sm">← Prev</a>
+        {% endif %}
+        <span class="text-muted" style="font-size:.9rem;">Page {{ current_page }} of {{ total_pages }}</span>
+        {% if current_page < total_pages %}
+        <a href="/profile?page={{ current_page + 1 }}" class="btn btn-sm">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+
 <script>
+function updateCounter(textarea) {
+    const counter = textarea.closest('form').querySelector('[data-counter]');
+    if (counter) counter.textContent = textarea.value.length + '/1020';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('textarea[name="notes"]').forEach(function(ta) {
+        updateCounter(ta);
+    });
+});
+
 (function() {
     const fields = ['warmup_minutes','drill_minutes','song_minutes','review_minutes'];
     const totalEl = document.getElementById('total-time');

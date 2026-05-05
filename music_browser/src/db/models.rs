@@ -771,3 +771,67 @@ pub struct CreateLiveSetSong {
     pub duration_seconds: i32,
     pub transition_notes: String,
 }
+
+// ============================================================================
+// Journal — horizontal tracking of completions
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum JournalEntryType {
+    ScheduleItem,
+    Goal,
+}
+
+impl JournalEntryType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JournalEntryType::ScheduleItem => "schedule_item",
+            JournalEntryType::Goal => "goal",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<JournalEntryType> {
+        match s {
+            "schedule_item" => Some(JournalEntryType::ScheduleItem),
+            "goal" => Some(JournalEntryType::Goal),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for JournalEntryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JournalEntry {
+    pub id: i64,
+    pub entry_date: String,
+    pub entry_type: String,
+    pub schedule_item_id: Option<i64>,
+    pub goal_id: Option<i64>,
+    pub notes: String,
+    pub created_at: String,
+    // Populated fields for display
+    pub schedule_item_title: String,
+    pub schedule_item_song_title: String,
+    pub schedule_item_exercise_name: String,
+    pub goal_title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateJournalEntry {
+    pub entry_date: String,
+    pub entry_type: String,
+    pub schedule_item_id: Option<i64>,
+    pub goal_id: Option<i64>,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateJournalEntry {
+    pub id: i64,
+    pub notes: String,
+}

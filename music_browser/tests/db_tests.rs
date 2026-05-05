@@ -2395,3 +2395,212 @@ async fn test_priority_weighted_schedule_generation() {
         events[0].items.iter().map(|i| &i.title).collect::<Vec<_>>()
     );
 }
+
+// ============================================================================
+// Journal entry tests
+// ============================================================================
+
+async fn make_schedule_item(pool: &SqlitePool) -> i64 {
+    use music_browser::db::models::{CreateScheduleEvent, CreateScheduleItem};
+    let eid = queries::create_schedule_event(
+        pool,
+        &CreateScheduleEvent {
+            event_date: "2026-05-01".to_string(),
+            title: "Session".to_string(),
+            event_type: "practice".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    queries::create_schedule_item(
+        pool,
+        &CreateScheduleItem {
+            event_id: eid,
+            item_type: "warmup".to_string(),
+            song_id: None,
+            exercise_id: None,
+            stage_id: None,
+            instrument_id: None,
+            title: "Scales".to_string(),
+            duration_minutes: 10,
+            sort_order: 0,
+            notes: String::new(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+async fn make_goal(pool: &SqlitePool) -> i64 {
+    use music_browser::db::models::CreateGoal;
+    queries::create_goal(
+        pool,
+        &CreateGoal {
+            horizon: "1_week".to_string(),
+            category: "practice".to_string(),
+            title: "Practice goal".to_string(),
+            description: String::new(),
+            target_date: String::new(),
+            sort_order: 0,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn test_update_journal_entry_notes() {
+    use music_browser::db::models::UpdateJournalEntry;
+    let (pool, _tmp) = setup_pool().await;
+
+    let iid = make_schedule_item(&pool).await;
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+
+    let entries = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].notes, "");
+
+    let eid = entries[0].id;
+    queries::update_journal_entry(
+        &pool,
+        &UpdateJournalEntry {
+            id: eid,
+            notes: "Felt good today".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let updated = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(updated[0].notes, "Felt good today");
+}
+
+#[tokio::test]
+async fn test_toggle_schedule_item_uncheck_empty_notes_deletes_entry() {
+    let (pool, _tmp) = setup_pool().await;
+    let iid = make_schedule_item(&pool).await;
+
+    // Check → creates journal entry
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+    let after_check = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(after_check.len(), 1, "Expected journal entry after check");
+
+    // Uncheck → notes empty, should delete entry
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+    let after_uncheck = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(
+        after_uncheck.len(),
+        0,
+        "Expected journal entry deleted on uncheck with empty notes"
+    );
+}
+
+#[tokio::test]
+async fn test_toggle_schedule_item_uncheck_with_notes_preserves_entry() {
+    use music_browser::db::models::UpdateJournalEntry;
+    let (pool, _tmp) = setup_pool().await;
+    let iid = make_schedule_item(&pool).await;
+
+    // Check → creates journal entry
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+    let entries = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+
+    // Add notes to the entry
+    queries::update_journal_entry(
+        &pool,
+        &UpdateJournalEntry {
+            id: entries[0].id,
+            notes: "Good warmup session".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Uncheck → notes not empty, should preserve entry
+    queries::toggle_schedule_item(&pool, iid).await.unwrap();
+    let after_uncheck = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(
+        after_uncheck.len(),
+        1,
+        "Expected journal entry preserved on uncheck when notes are present"
+    );
+    assert_eq!(after_uncheck[0].notes, "Good warmup session");
+}
+
+#[tokio::test]
+async fn test_toggle_goal_uncheck_empty_notes_deletes_entry() {
+    let (pool, _tmp) = setup_pool().await;
+    let gid = make_goal(&pool).await;
+
+    // Complete → creates journal entry
+    queries::toggle_goal(&pool, gid).await.unwrap();
+    let after_complete = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(
+        after_complete.len(),
+        1,
+        "Expected journal entry after goal completion"
+    );
+
+    // Uncomplete → notes empty, should delete entry
+    queries::toggle_goal(&pool, gid).await.unwrap();
+    let after_uncomplete = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(
+        after_uncomplete.len(),
+        0,
+        "Expected journal entry deleted on goal uncheck with empty notes"
+    );
+}
+
+#[tokio::test]
+async fn test_toggle_goal_uncheck_with_notes_preserves_entry() {
+    use music_browser::db::models::UpdateJournalEntry;
+    let (pool, _tmp) = setup_pool().await;
+    let gid = make_goal(&pool).await;
+
+    // Complete → creates journal entry
+    queries::toggle_goal(&pool, gid).await.unwrap();
+    let entries = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+
+    // Add notes to the entry
+    queries::update_journal_entry(
+        &pool,
+        &UpdateJournalEntry {
+            id: entries[0].id,
+            notes: "Achieved this goal!".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Uncomplete → notes not empty, should preserve entry
+    queries::toggle_goal(&pool, gid).await.unwrap();
+    let after_uncomplete = queries::list_journal_entries(&pool, Some(10), Some(0))
+        .await
+        .unwrap();
+    assert_eq!(
+        after_uncomplete.len(),
+        1,
+        "Expected journal entry preserved on goal uncheck when notes are present"
+    );
+    assert_eq!(after_uncomplete[0].notes, "Achieved this goal!");
+}
