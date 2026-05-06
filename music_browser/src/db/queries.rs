@@ -1583,10 +1583,47 @@ pub async fn create_goal(pool: &SqlitePool, input: &CreateGoal) -> Result<i64, s
 }
 
 pub async fn toggle_goal(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    // Get current state
+    let row = sqlx::query("SELECT completed FROM goals WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    let current_completed: bool = row.get("completed");
+
+    // Toggle the goal
     sqlx::query("UPDATE goals SET completed = NOT completed WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;
+
+    if !current_completed {
+        // Marking complete: create journal entry with today's date
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let entry = CreateJournalEntry {
+            entry_date: today,
+            entry_type: "goal".to_string(),
+            schedule_item_id: None,
+            goal_id: Some(id),
+            notes: String::new(),
+        };
+        create_journal_entry(pool, &entry).await?;
+    } else {
+        // Unchecking: delete journal entry only if notes are empty
+        let existing = sqlx::query(
+            "SELECT id, notes FROM journal_entries WHERE goal_id = ? AND entry_type = 'goal' LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(row) = existing {
+            let notes: String = row.get::<Option<String>, _>("notes").unwrap_or_default();
+            if notes.trim().is_empty() {
+                let entry_id: i64 = row.get("id");
+                delete_journal_entry(pool, entry_id).await?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1713,10 +1750,47 @@ pub async fn create_schedule_item(
 }
 
 pub async fn toggle_schedule_item(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    // Get current state
+    let row = sqlx::query("SELECT completed FROM schedule_items WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    let current_completed: bool = row.get("completed");
+
+    // Toggle the schedule item
     sqlx::query("UPDATE schedule_items SET completed = NOT completed WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;
+
+    if !current_completed {
+        // Marking complete: create journal entry with today's date
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let entry = CreateJournalEntry {
+            entry_date: today,
+            entry_type: "schedule_item".to_string(),
+            schedule_item_id: Some(id),
+            goal_id: None,
+            notes: String::new(),
+        };
+        create_journal_entry(pool, &entry).await?;
+    } else {
+        // Unchecking: delete journal entry only if notes are empty
+        let existing = sqlx::query(
+            "SELECT id, notes FROM journal_entries WHERE schedule_item_id = ? AND entry_type = 'schedule_item' LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(row) = existing {
+            let notes: String = row.get::<Option<String>, _>("notes").unwrap_or_default();
+            if notes.trim().is_empty() {
+                let entry_id: i64 = row.get("id");
+                delete_journal_entry(pool, entry_id).await?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -2156,6 +2230,150 @@ pub async fn add_song_to_set(
 
 pub async fn remove_song_from_set(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM live_set_songs WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ============================================================================
+// Journal entries — horizontal tracking of completions
+// ============================================================================
+
+pub async fn list_journal_entries(
+    pool: &SqlitePool,
+    limit: Option<i32>,
+    offset: Option<i32>,
+) -> Result<Vec<JournalEntry>, sqlx::Error> {
+    let limit_val = limit.unwrap_or(100);
+    let offset_val = offset.unwrap_or(0);
+    let rows = sqlx::query(
+        "SELECT
+            je.id,
+            je.entry_date,
+            je.entry_type,
+            je.schedule_item_id,
+            je.goal_id,
+            je.notes,
+            je.created_at,
+            COALESCE(si.title, '') as schedule_item_title,
+            COALESCE(s.title, '') as schedule_item_song_title,
+            COALESCE(pe.name, '') as schedule_item_exercise_name,
+            COALESCE(g.title, '') as goal_title
+        FROM journal_entries je
+        LEFT JOIN schedule_items si ON je.schedule_item_id = si.id
+        LEFT JOIN songs s ON si.song_id = s.id
+        LEFT JOIN practice_exercises pe ON si.exercise_id = pe.id
+        LEFT JOIN goals g ON je.goal_id = g.id
+        ORDER BY je.entry_date DESC, je.created_at DESC
+        LIMIT ? OFFSET ?",
+    )
+    .bind(limit_val)
+    .bind(offset_val)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|r| JournalEntry {
+            id: r.get("id"),
+            entry_date: r.get("entry_date"),
+            entry_type: r.get("entry_type"),
+            schedule_item_id: r.get("schedule_item_id"),
+            goal_id: r.get("goal_id"),
+            notes: r.get("notes"),
+            created_at: r.get("created_at"),
+            schedule_item_title: r.get("schedule_item_title"),
+            schedule_item_song_title: r.get("schedule_item_song_title"),
+            schedule_item_exercise_name: r.get("schedule_item_exercise_name"),
+            goal_title: r.get("goal_title"),
+        })
+        .collect())
+}
+
+pub async fn list_journal_entries_by_date(
+    pool: &SqlitePool,
+    date: &str,
+    offset: Option<i32>,
+) -> Result<Vec<JournalEntry>, sqlx::Error> {
+    let offset_val = offset.unwrap_or(0);
+    let rows = sqlx::query(
+        "SELECT
+            je.id,
+            je.entry_date,
+            je.entry_type,
+            je.schedule_item_id,
+            je.goal_id,
+            je.notes,
+            je.created_at,
+            COALESCE(si.title, '') as schedule_item_title,
+            COALESCE(s.title, '') as schedule_item_song_title,
+            COALESCE(pe.name, '') as schedule_item_exercise_name,
+            COALESCE(g.title, '') as goal_title
+        FROM journal_entries je
+        LEFT JOIN schedule_items si ON je.schedule_item_id = si.id
+        LEFT JOIN songs s ON si.song_id = s.id
+        LEFT JOIN practice_exercises pe ON si.exercise_id = pe.id
+        LEFT JOIN goals g ON je.goal_id = g.id
+        WHERE je.entry_date = ?
+        ORDER BY je.created_at DESC
+        LIMIT 1000 OFFSET ?",
+    )
+    .bind(date)
+    .bind(offset_val)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|r| JournalEntry {
+            id: r.get("id"),
+            entry_date: r.get("entry_date"),
+            entry_type: r.get("entry_type"),
+            schedule_item_id: r.get("schedule_item_id"),
+            goal_id: r.get("goal_id"),
+            notes: r.get("notes"),
+            created_at: r.get("created_at"),
+            schedule_item_title: r.get("schedule_item_title"),
+            schedule_item_song_title: r.get("schedule_item_song_title"),
+            schedule_item_exercise_name: r.get("schedule_item_exercise_name"),
+            goal_title: r.get("goal_title"),
+        })
+        .collect())
+}
+
+pub async fn create_journal_entry(
+    pool: &SqlitePool,
+    input: &CreateJournalEntry,
+) -> Result<i64, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT INTO journal_entries (entry_date, entry_type, schedule_item_id, goal_id, notes) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&input.entry_date)
+    .bind(&input.entry_type)
+    .bind(input.schedule_item_id)
+    .bind(input.goal_id)
+    .bind(&input.notes)
+    .execute(pool)
+    .await?;
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn update_journal_entry(
+    pool: &SqlitePool,
+    input: &super::models::UpdateJournalEntry,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE journal_entries SET notes = ? WHERE id = ?")
+        .bind(&input.notes)
+        .bind(input.id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_journal_entry(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM journal_entries WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;

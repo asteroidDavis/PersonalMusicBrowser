@@ -1570,6 +1570,9 @@ async fn goal_delete(
 #[template(path = "profile.html")]
 struct ProfileTemplate {
     profile: UserProfile,
+    journal_entries: Vec<JournalEntry>,
+    current_page: i32,
+    total_pages: i32,
 }
 
 #[derive(Deserialize)]
@@ -1583,13 +1586,36 @@ struct ProfileFormData {
     notes: String,
 }
 
-async fn profile_view(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+async fn profile_view(
+    pool: web::Data<SqlitePool>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> actix_web::Result<HttpResponse> {
+    let page: i32 = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
+    let per_page = 20;
+    let offset = (page - 1) * per_page;
+
     let profile = queries::get_profile(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = ProfileTemplate { profile }
-        .render()
+    let journal_entries = queries::list_journal_entries(&pool, Some(per_page), Some(offset))
+        .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    // Get total count for pagination
+    let total_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM journal_entries")
+        .fetch_one(&**pool)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let total_pages = ((total_count as f64) / (per_page as f64)).ceil() as i32;
+
+    let body = ProfileTemplate {
+        profile,
+        journal_entries,
+        current_page: page,
+        total_pages,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
@@ -1612,6 +1638,43 @@ async fn profile_update(
     )
     .await
     .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/profile"))
+        .finish())
+}
+
+// ---------------------------------------------------------------------------
+// Journal entries
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct JournalNotesForm {
+    notes: String,
+}
+
+async fn journal_entry_update_notes(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+    form: QsForm<JournalNotesForm>,
+) -> actix_web::Result<HttpResponse> {
+    let id = path.into_inner();
+    let mut notes = form.0.notes;
+    notes.truncate(1020);
+    queries::update_journal_entry(&pool, &UpdateJournalEntry { id, notes })
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/profile"))
+        .finish())
+}
+
+async fn journal_entry_delete(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<i64>,
+) -> actix_web::Result<HttpResponse> {
+    queries::delete_journal_entry(&pool, path.into_inner())
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/profile"))
         .finish())
@@ -2219,6 +2282,12 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
         // Profile
         .route("/profile", web::get().to(profile_view))
         .route("/profile", web::post().to(profile_update))
+        // Journal entries
+        .route(
+            "/journal/{id}/notes",
+            web::post().to(journal_entry_update_notes),
+        )
+        .route("/journal/{id}/delete", web::post().to(journal_entry_delete))
         // Schedule
         .route("/schedule", web::get().to(schedule_list))
         .route("/schedule/generate", web::post().to(schedule_generate))
