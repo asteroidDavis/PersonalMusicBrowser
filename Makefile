@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run pocketbase-run
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -31,3 +31,19 @@ rust-clean:
 
 rust-run:
 	@. ~/.cargo/env && cd music_browser && cargo run --bin music-browser
+
+pocketbase-run:
+	@if [ -x pocketbase/pocketbase ]; then \
+		POCKETBASE_BIN=pocketbase/pocketbase; \
+	else \
+		POCKETBASE_BIN=pocketbase; \
+	fi; \
+	CERT_PATH=$${POCKETBASE_CERT_PATH:-pocketbase/localhost+2.pem}; \
+	KEY_PATH=$${POCKETBASE_KEY_PATH:-pocketbase/localhost+2-key.pem}; \
+	if [ -f "$$CERT_PATH" ] && [ -f "$$KEY_PATH" ]; then \
+		$$POCKETBASE_BIN serve --dir pocketbase/pb_data --https 127.0.0.1:8090 "$$CERT_PATH" "$$KEY_PATH"; \
+	else \
+		echo "TLS certificate files not found; starting PocketBase over HTTP for bootstrap."; \
+		echo "Set POCKETBASE_CERT_PATH and POCKETBASE_KEY_PATH or create pocketbase/localhost+2.pem and pocketbase/localhost+2-key.pem."; \
+		$$POCKETBASE_BIN serve --dir pocketbase/pb_data --http 127.0.0.1:8090; \
+	fi

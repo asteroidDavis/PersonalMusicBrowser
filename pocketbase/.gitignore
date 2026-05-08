@@ -1,0 +1,5 @@
+pocketbase
+pb_data/
+*.pem
+*.key
+*.crt

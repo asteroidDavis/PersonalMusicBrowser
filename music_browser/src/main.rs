@@ -5,6 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
+use music_browser::auth::{self, AuthConfig};
 use music_browser::db::models::*;
 use music_browser::db::queries;
 use music_browser::jobs::{
@@ -2175,6 +2176,10 @@ fn find_wav_inputs(root: &str) -> actix_web::Result<Vec<String>> {
 
 pub fn configure_app(cfg: &mut web::ServiceConfig) {
     cfg
+        // Auth
+        .route("/login", web::get().to(auth::login_view))
+        .route("/login", web::post().to(auth::login_submit))
+        .route("/logout", web::post().to(auth::logout))
         // Songs
         .route("/", web::get().to(song_list))
         .route("/songs/new", web::get().to(song_new))
@@ -2352,6 +2357,8 @@ async fn main() -> std::io::Result<()> {
 
     let pool_data = web::Data::new(pool);
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
+    let auth_config = AuthConfig::from_env();
+    let auth_data = web::Data::new(auth_config);
 
     let (job_queue, job_receiver) = JobQueue::new(256);
     let job_store = job_queue.store.clone();
@@ -2367,6 +2374,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(pool_data.clone())
+            .app_data(auth_data.clone())
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
             .configure(configure_app)
