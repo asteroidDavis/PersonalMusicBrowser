@@ -13,8 +13,13 @@ fn test_auth_config(pocketbase_url: String) -> AuthConfig {
     }
 }
 
+fn setup_csrf() {
+    std::env::set_var("CSRF_SECRET", "test-csrf-secret-for-integration-tests");
+}
+
 #[actix_web::test]
 async fn login_page_renders_signup_link() {
+    setup_csrf();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(test_auth_config(
@@ -35,6 +40,7 @@ async fn login_page_renders_signup_link() {
 
 #[actix_web::test]
 async fn signup_page_renders_password_requirements() {
+    setup_csrf();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(test_auth_config(
@@ -56,6 +62,7 @@ async fn signup_page_renders_password_requirements() {
 
 #[actix_web::test]
 async fn signup_rejects_weak_password_without_calling_pocketbase() {
+    setup_csrf();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(test_auth_config(
@@ -79,6 +86,7 @@ async fn signup_rejects_weak_password_without_calling_pocketbase() {
 
 #[actix_web::test]
 async fn signup_rejects_password_mismatch_without_calling_pocketbase() {
+    setup_csrf();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(test_auth_config(
@@ -102,6 +110,7 @@ async fn signup_rejects_password_mismatch_without_calling_pocketbase() {
 
 #[actix_web::test]
 async fn signup_posts_to_pocketbase_and_redirects_to_login() {
+    setup_csrf();
     let pb = actix_test::start(|| {
         App::new().route(
             "/api/collections/users/records",
@@ -134,6 +143,7 @@ async fn signup_posts_to_pocketbase_and_redirects_to_login() {
 
 #[actix_web::test]
 async fn signup_returns_unavailable_message_when_pocketbase_cannot_be_reached() {
+    setup_csrf();
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(test_auth_config(
@@ -157,6 +167,7 @@ async fn signup_returns_unavailable_message_when_pocketbase_cannot_be_reached() 
 
 #[actix_web::test]
 async fn login_posts_to_pocketbase_sets_cookie_and_redirects_home() {
+    setup_csrf();
     let pb = actix_test::start(|| {
         App::new().route(
             "/api/collections/users/auth-with-password",
@@ -195,6 +206,7 @@ async fn login_posts_to_pocketbase_sets_cookie_and_redirects_home() {
 
 #[actix_web::test]
 async fn auth_middleware_allows_public_auth_routes_and_redirects_protected_html() {
+    setup_csrf();
     let config = test_auth_config("http://127.0.0.1:1".into());
     let app = test::init_service(
         App::new()
