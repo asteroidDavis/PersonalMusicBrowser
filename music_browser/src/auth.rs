@@ -37,9 +37,24 @@ impl AuthConfig {
             );
         }
 
+        let pocketbase_url = std::env::var("POCKETBASE_URL")
+            .unwrap_or_else(|_| "https://127.0.0.1:8090".into());
+
+        // Validate URL scheme to prevent SSRF
+        if let Err(e) = url::Url::parse(&pocketbase_url) {
+            panic!("Invalid POCKETBASE_URL: {}", e);
+        }
+        let url = url::Url::parse(&pocketbase_url).unwrap();
+        match url.scheme() {
+            "http" | "https" => {}
+            scheme => panic!(
+                "POCKETBASE_URL must use http or https scheme, got: {}",
+                scheme
+            ),
+        }
+
         Self {
-            pocketbase_url: std::env::var("POCKETBASE_URL")
-                .unwrap_or_else(|_| "https://127.0.0.1:8090".into()),
+            pocketbase_url,
             jwt_secret,
             cookie_secure: std::env::var("AUTH_COOKIE_SECURE")
                 .map(|value| value == "true" || value == "1")
@@ -103,7 +118,7 @@ pub fn validate_token(
 }
 
 fn is_public_path(path: &str) -> bool {
-    path == "/login" || path == "/signup"
+    path == "/login" || path == "/signup" || path == "/logout"
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtMiddleware
@@ -362,9 +377,10 @@ pub async fn signup_submit(
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            let sanitized_body = body.chars().take(200).collect::<String>().replace('\n', " ");
             warn!(
                 "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
-                status, body
+                status, sanitized_body
             );
             signup_error("Signup failed. Check your email and password, then try again.")
         }
@@ -422,6 +438,7 @@ pub async fn login_submit(
 
                 let flag_cookie = actix_web::cookie::Cookie::build("auth_present", "1")
                     .path("/")
+                    .secure(config.cookie_secure)
                     .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
                 return Ok(HttpResponse::SeeOther()
@@ -434,9 +451,10 @@ pub async fn login_submit(
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            let sanitized_body = body.chars().take(200).collect::<String>().replace('\n', " ");
             warn!(
                 "[AUTH_FAILED] PocketBase login rejected with status {}: {}",
-                status, body
+                status, sanitized_body
             );
         }
         Err(e) => {
