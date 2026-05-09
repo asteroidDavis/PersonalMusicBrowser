@@ -1,6 +1,6 @@
+use actix_multipart::form::MultipartForm;
 use actix_web::dev::Payload;
 use actix_web::{web, FromRequest, HttpMessage, HttpRequest, HttpResponse};
-use actix_multipart::form::MultipartForm;
 use askama::Template;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -10,7 +10,8 @@ use crate::auth;
 use crate::db::models::*;
 use crate::db::queries;
 use crate::jobs::{
-    check_hydration, HydrationStatus, JobQueue, JobRecord, JobStatus, JobStore, Operation, TargetType, WorkflowJob,
+    check_hydration, HydrationStatus, JobQueue, JobRecord, JobStatus, JobStore, Operation,
+    TargetType, WorkflowJob,
 };
 
 /// Extract the `Referer` header from a request, falling back to `default`.
@@ -2081,19 +2082,13 @@ async fn resolve_paths(
         TargetType::File | TargetType::Directory => {
             let path = std::path::Path::new(target_id_or_path);
             match check_hydration(path) {
-                HydrationStatus::NotFound => {
-                    Err(actix_web::error::ErrorUnprocessableEntity(format!(
-                        "path not found on disk: {target_id_or_path}"
-                    )))
-                }
-                HydrationStatus::Placeholder => {
-                    Err(actix_web::error::ErrorUnprocessableEntity(format!(
-                        "file is a cloud placeholder (not hydrated): {target_id_or_path}"
-                    )))
-                }
-                HydrationStatus::Hydrated => {
-                    Ok((vec![target_id_or_path.to_string()], None))
-                }
+                HydrationStatus::NotFound => Err(actix_web::error::ErrorUnprocessableEntity(
+                    format!("path not found on disk: {target_id_or_path}"),
+                )),
+                HydrationStatus::Placeholder => Err(actix_web::error::ErrorUnprocessableEntity(
+                    format!("file is a cloud placeholder (not hydrated): {target_id_or_path}"),
+                )),
+                HydrationStatus::Hydrated => Ok((vec![target_id_or_path.to_string()], None)),
             }
         }
     }
