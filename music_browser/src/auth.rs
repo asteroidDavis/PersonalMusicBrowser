@@ -1,6 +1,6 @@
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::error::{ErrorBadRequest, ErrorUnauthorized};
-use actix_web::{web, Error, HttpMessage, HttpRequest, HttpResponse, ResponseError};
+use actix_web::error::{Error, ErrorBadRequest, ErrorUnauthorized};
+use actix_web::{web, HttpResponse, ResponseError};
 use askama::Template;
 use futures_util::future::LocalBoxFuture;
 use log::{info, warn};
@@ -387,20 +387,13 @@ pub struct SignupRequest {
 }
 
 pub async fn login_view(
-    req: HttpRequest,
+    csrf: CsrfToken,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
-    // Try to extract CSRF token if middleware is present
-    let csrf_token = req
-        .extensions()
-        .get::<CsrfToken>()
-        .map(|t| t.0.clone())
-        .unwrap_or_default();
-
     let tmpl = LoginTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
-        csrf_token,
+        csrf_token: csrf.0,
     };
     let html = tmpl
         .render()
@@ -409,20 +402,13 @@ pub async fn login_view(
 }
 
 pub async fn signup_view(
-    req: HttpRequest,
+    csrf: CsrfToken,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
-    // Try to extract CSRF token if middleware is present
-    let csrf_token = req
-        .extensions()
-        .get::<CsrfToken>()
-        .map(|t| t.0.clone())
-        .unwrap_or_default();
-
     let tmpl = SignupTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
-        csrf_token,
+        csrf_token: csrf.0,
     };
     let html = tmpl
         .render()
@@ -432,15 +418,11 @@ pub async fn signup_view(
 
 pub async fn signup_submit(
     form: web::Form<SignupRequest>,
-    req: HttpRequest,
+    csrf: CsrfToken,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
     let email = form.email.trim().to_lowercase();
-    let csrf_token = req
-        .extensions()
-        .get::<CsrfToken>()
-        .map(|t| t.0.clone())
-        .unwrap_or_default();
+    let csrf_token = csrf.0;
 
     if !email.contains('@') || email.len() > MAX_EMAIL_LENGTH {
         warn!(
@@ -524,14 +506,10 @@ fn signup_error(message: &str, csrf_token: String) -> actix_web::Result<HttpResp
 
 pub async fn login_submit(
     form: web::Form<LoginRequest>,
-    req: HttpRequest,
+    csrf: CsrfToken,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
-    let csrf_token = req
-        .extensions()
-        .get::<CsrfToken>()
-        .map(|t| t.0.clone())
-        .unwrap_or_default();
+    let csrf_token = csrf.0;
 
     if form.identity.trim().is_empty() || form.password.is_empty() {
         warn!(
@@ -562,13 +540,11 @@ pub async fn login_submit(
                     .path("/")
                     .http_only(true)
                     .secure(config.cookie_secure)
-                    .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
 
                 let flag_cookie = actix_web::cookie::Cookie::build("auth_present", "1")
                     .path("/")
                     .secure(config.cookie_secure)
-                    .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
                 return Ok(HttpResponse::SeeOther()
                     .append_header(("Location", "/"))

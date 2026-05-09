@@ -1,4 +1,6 @@
+use actix_web::cookie::SameSite;
 use actix_web::{middleware, web, App, HttpServer};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
 use music_browser::app;
@@ -26,7 +28,32 @@ async fn main() -> std::io::Result<()> {
     // CSRF middleware configuration
     let csrf_secret = std::env::var("CSRF_SECRET")
         .unwrap_or_else(|_| "change-me-to-a-secure-random-32-byte-secret".to_string());
-    let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes());
+
+    // HTTPS configuration
+    let https_enabled = std::env::var("HTTPS_ENABLED")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    // CSRF cookie secure flag - must be true when using HTTPS
+    let cookie_secure = std::env::var("CSRF_COOKIE_SECURE")
+        .unwrap_or_else(|_| if https_enabled { "true" } else { "false" }.to_string())
+        .parse::<bool>()
+        .unwrap_or(https_enabled);
+
+    // Use Strict for HTTPS, Lax for HTTP
+    let same_site = if cookie_secure {
+        SameSite::Strict
+    } else {
+        SameSite::Lax
+    };
+
+    let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
+        .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
+            http_only: false,
+            secure: cookie_secure,
+            same_site,
+        });
 
     if csrf_secret == "change-me-to-a-secure-random-32-byte-secret" {
         log::warn!(
@@ -40,9 +67,10 @@ async fn main() -> std::io::Result<()> {
     let queue_data = web::Data::new(job_queue);
     let store_data = web::Data::new(job_store);
 
-    log::info!("Listening on http://{bind}");
+    let protocol = if https_enabled { "https" } else { "http" };
+    log::info!("Listening on {}://{bind}", protocol);
 
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         let request_auth = auth_data.require_login;
 
         App::new()
@@ -56,8 +84,26 @@ async fn main() -> std::io::Result<()> {
                 auth::JwtMiddleware::new(auth_data.get_ref().clone()),
             ))
             .configure(app::configure_app)
-    })
-    .bind(&bind)?
-    .run()
-    .await
+    });
+
+    let server = if https_enabled {
+        let cert_path =
+            std::env::var("SSL_CERT_PATH").unwrap_or_else(|_| "./certs/server.crt".to_string());
+        let key_path =
+            std::env::var("SSL_KEY_PATH").unwrap_or_else(|_| "./certs/server.key".to_string());
+
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        builder
+            .set_certificate_file(&cert_path, SslFiletype::PEM)
+            .expect("Failed to load SSL certificate");
+        builder
+            .set_private_key_file(&key_path, SslFiletype::PEM)
+            .expect("Failed to load SSL private key");
+
+        server.bind_openssl(&bind, builder)?
+    } else {
+        server.bind(&bind)?
+    };
+
+    server.run().await
 }

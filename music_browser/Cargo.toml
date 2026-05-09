@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = { version = "4", features = ["macros"] }
+actix-web = { version = "4", features = ["macros", "openssl"] }
 actix-files = "0.6"
 askama = { version = "0.12", features = ["with-actix-web"] }
 askama_actix = "0.14"
@@ -30,6 +30,7 @@ async-trait = "0.1.89"
 futures-util = "0.3.32"
 url = "2"
 actix-csrf-middleware = "0.5.4"
+openssl = { version = "0.10", features = ["v110"] }
 
 [[bin]]
 name = "music-browser"
