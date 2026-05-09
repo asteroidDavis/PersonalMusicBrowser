@@ -9,6 +9,29 @@ use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 use std::rc::Rc;
 
+/// User-facing error messages that obscure implementation details
+#[derive(Debug, Clone)]
+pub struct UserError {
+    pub message: &'static str,
+    pub log_context: &'static str,
+}
+
+impl UserError {
+    const fn new(message: &'static str, log_context: &'static str) -> Self {
+        Self { message, log_context }
+    }
+}
+
+// Error mapping table - maps specific error contexts to user-facing messages
+pub const ERR_INVALID_EMAIL: UserError = UserError::new("Enter a valid email address.", "invalid_email");
+pub const ERR_WEAK_PASSWORD: UserError = UserError::new("Use a password with at least 12 characters.", "weak_password");
+pub const ERR_PASSWORD_MISMATCH: UserError = UserError::new("Passwords do not match.", "password_mismatch");
+pub const ERR_SIGNUP_FAILED: UserError = UserError::new("Signup failed. Check your email and password, then try again.", "signup_failed");
+pub const ERR_SIGNUP_UNAVAILABLE: UserError = UserError::new("Signup service is unavailable. Try again later.", "signup_unavailable");
+pub const ERR_LOGIN_FAILED: UserError = UserError::new("Invalid credentials or server offline", "login_failed");
+pub const ERR_INVALID_REQUEST: UserError = UserError::new("Invalid request", "invalid_request");
+pub const ERR_INTERNAL_ERROR: UserError = UserError::new("Internal error", "internal_error");
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub id: String,
@@ -37,6 +60,12 @@ impl AuthConfig {
             );
         }
 
+        if allow_empty {
+            log::warn!(
+                "⚠️  SECURITY WARNING: AUTH_ALLOW_EMPTY_JWT_SECRET is enabled. This is an EMERGENCY-ONLY setting that disables JWT signature validation. The application is running in an INSECURE configuration. Re-enable proper authentication as soon as possible."
+            );
+        }
+
         let pocketbase_url = std::env::var("POCKETBASE_URL")
             .unwrap_or_else(|_| "https://127.0.0.1:8090".into());
 
@@ -53,17 +82,29 @@ impl AuthConfig {
             ),
         }
 
+        let cookie_secure = std::env::var("AUTH_COOKIE_SECURE")
+            .map(|value| value == "true" || value == "1")
+            .unwrap_or(true);
+
+        if !cookie_secure {
+            log::warn!(
+                "⚠️  SECURITY WARNING: AUTH_COOKIE_SECURE is disabled. Auth cookies will be sent over HTTP connections. This is an INSECURE configuration."
+            );
+        }
+
         Self {
             pocketbase_url,
             jwt_secret,
-            cookie_secure: std::env::var("AUTH_COOKIE_SECURE")
-                .map(|value| value == "true" || value == "1")
-                .unwrap_or(true),
+            cookie_secure,
             require_login: std::env::var("AUTH_REQUIRE_LOGIN")
                 .map(|value| value == "true" || value == "1")
                 .unwrap_or(false),
             pocketbase_ca_cert: std::env::var("POCKETBASE_CA_CERT").ok(),
         }
+    }
+
+    pub fn is_insecure(&self) -> bool {
+        self.jwt_secret.is_empty() || !self.cookie_secure
     }
 
     pub fn build_client(&self) -> Result<reqwest::Client, reqwest::Error> {
@@ -291,12 +332,14 @@ where
 #[template(path = "login.html")]
 pub struct LoginTemplate {
     pub error_message: Option<String>,
+    pub is_insecure: bool,
 }
 
 #[derive(Template)]
 #[template(path = "signup.html")]
 pub struct SignupTemplate {
     pub error_message: Option<String>,
+    pub is_insecure: bool,
 }
 
 #[derive(Deserialize)]
@@ -312,9 +355,12 @@ pub struct SignupRequest {
     pub password_confirm: String,
 }
 
-pub async fn login_view() -> actix_web::Result<HttpResponse> {
+pub async fn login_view(
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
     let tmpl = LoginTemplate {
         error_message: None,
+        is_insecure: config.is_insecure(),
     };
     let html = tmpl
         .render()
@@ -322,9 +368,12 @@ pub async fn login_view() -> actix_web::Result<HttpResponse> {
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
-pub async fn signup_view() -> actix_web::Result<HttpResponse> {
+pub async fn signup_view(
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
     let tmpl = SignupTemplate {
         error_message: None,
+        is_insecure: config.is_insecure(),
     };
     let html = tmpl
         .render()
@@ -339,23 +388,23 @@ pub async fn signup_submit(
     let email = form.email.trim().to_lowercase();
 
     if !email.contains('@') || email.len() > 254 {
-        warn!("[AUTH_FAILED] Signup rejected for invalid email.");
-        return signup_error("Enter a valid email address.");
+        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_INVALID_EMAIL.log_context);
+        return signup_error(ERR_INVALID_EMAIL.message);
     }
 
     if form.password.len() < 12 {
-        warn!("[AUTH_FAILED] Signup rejected for weak password.");
-        return signup_error("Use a password with at least 12 characters.");
+        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_WEAK_PASSWORD.log_context);
+        return signup_error(ERR_WEAK_PASSWORD.message);
     }
 
     if form.password != form.password_confirm {
-        warn!("[AUTH_FAILED] Signup rejected for password mismatch.");
-        return signup_error("Passwords do not match.");
+        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_PASSWORD_MISMATCH.log_context);
+        return signup_error(ERR_PASSWORD_MISMATCH.message);
     }
 
     let client = config.build_client().map_err(|e| {
         warn!("[AUTH_FAILED] Failed to build HTTP client: {}", e);
-        actix_web::error::ErrorInternalServerError("Internal error")
+        actix_web::error::ErrorInternalServerError(ERR_INTERNAL_ERROR.message)
     })?;
     let res = client
         .post(config.users_records_url())
@@ -382,11 +431,11 @@ pub async fn signup_submit(
                 "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
                 status, sanitized_body
             );
-            signup_error("Signup failed. Check your email and password, then try again.")
+            signup_error(ERR_SIGNUP_FAILED.message)
         }
         Err(e) => {
             warn!("[AUTH_FAILED] PocketBase signup connection error: {}", e);
-            signup_error("Signup service is unavailable. Try again later.")
+            signup_error(ERR_SIGNUP_UNAVAILABLE.message)
         }
     }
 }
@@ -394,6 +443,7 @@ pub async fn signup_submit(
 fn signup_error(message: &str) -> actix_web::Result<HttpResponse> {
     let tmpl = SignupTemplate {
         error_message: Some(message.into()),
+        is_insecure: false,
     };
     let html = tmpl
         .render()
@@ -408,13 +458,13 @@ pub async fn login_submit(
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
     if form.identity.trim().is_empty() || form.password.is_empty() {
-        warn!("[AUTH_FAILED] Login rejected for empty identity or password.");
-        return Err(ErrorBadRequest("Invalid login request"));
+        warn!("[AUTH_FAILED] Login rejected: {}", ERR_INVALID_REQUEST.log_context);
+        return Err(ErrorBadRequest(ERR_INVALID_REQUEST.message));
     }
 
     let client = config.build_client().map_err(|e| {
         warn!("[AUTH_FAILED] Failed to build HTTP client: {}", e);
-        actix_web::error::ErrorInternalServerError("Internal error")
+        actix_web::error::ErrorInternalServerError(ERR_INTERNAL_ERROR.message)
     })?;
     let res = client
         .post(config.auth_with_password_url())
@@ -463,7 +513,8 @@ pub async fn login_submit(
     }
 
     let tmpl = LoginTemplate {
-        error_message: Some("Invalid credentials or server offline".into()),
+        error_message: Some(ERR_LOGIN_FAILED.message.into()),
+        is_insecure: false,
     };
     let html = tmpl
         .render()

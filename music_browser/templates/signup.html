@@ -3,6 +3,12 @@
 {% block title %}Sign Up - Music Browser{% endblock %}
 
 {% block content %}
+{% if is_insecure %}
+<div style="background:#dc2626;color:white;padding:1rem;margin-bottom:1.5rem;border-radius:8px;text-align:center;font-weight:600;border:2px solid #b91c1c;">
+    ⚠️ SECURITY WARNING: This application is running in an insecure configuration. Re-enable proper authentication before deploying to production.
+</div>
+{% endif %}
+
 <div class="page-header">
     <h2>Create Account</h2>
 </div>

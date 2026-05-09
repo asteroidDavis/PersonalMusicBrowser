@@ -15,7 +15,14 @@ fn test_auth_config(pocketbase_url: String) -> AuthConfig {
 
 #[actix_web::test]
 async fn login_page_renders_signup_link() {
-    let app = test::init_service(App::new().configure(app::configure_app)).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(test_auth_config(
+                "http://127.0.0.1:1".into(),
+            )))
+            .configure(app::configure_app),
+    )
+    .await;
 
     let req = test::TestRequest::get().uri("/login").to_request();
     let resp = test::call_service(&app, req).await;
@@ -28,7 +35,14 @@ async fn login_page_renders_signup_link() {
 
 #[actix_web::test]
 async fn signup_page_renders_password_requirements() {
-    let app = test::init_service(App::new().configure(app::configure_app)).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(test_auth_config(
+                "http://127.0.0.1:1".into(),
+            )))
+            .configure(app::configure_app),
+    )
+    .await;
 
     let req = test::TestRequest::get().uri("/signup").to_request();
     let resp = test::call_service(&app, req).await;

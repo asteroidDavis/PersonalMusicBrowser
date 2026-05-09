@@ -455,7 +455,7 @@ pub async fn song_list(
         })
         .collect();
 
-    let is_authenticated = req.extensions().get::<auth::Claims>().is_some();
+    let is_authenticated = req.extensions().get::<crate::auth::Claims>().is_some();
 
     let body = SongsTemplate {
         songs: views,
