@@ -6,7 +6,6 @@ use serde_json::Value;
 fn test_auth_config(pocketbase_url: String) -> AuthConfig {
     AuthConfig {
         pocketbase_url,
-        jwt_secret: "test-secret".into(),
         cookie_secure: false,
         require_login: true,
         pocketbase_ca_cert: None,

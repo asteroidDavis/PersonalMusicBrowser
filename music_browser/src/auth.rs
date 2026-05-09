@@ -3,9 +3,8 @@ use actix_web::error::{ErrorBadRequest, ErrorUnauthorized};
 use actix_web::{web, Error, HttpMessage, HttpRequest, HttpResponse, ResponseError};
 use askama::Template;
 use futures_util::future::LocalBoxFuture;
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use log::{info, warn};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::future::{ready, Ready};
 use std::rc::Rc;
 
@@ -61,16 +60,9 @@ pub const ERR_LOGIN_FAILED: UserError =
 pub const ERR_INVALID_REQUEST: UserError = UserError::new("Invalid request", "invalid_request");
 pub const ERR_INTERNAL_ERROR: UserError = UserError::new("Internal error", "internal_error");
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
-    pub id: String,
-    pub exp: usize,
-}
-
 #[derive(Clone)]
 pub struct AuthConfig {
     pub pocketbase_url: String,
-    pub jwt_secret: String,
     pub cookie_secure: bool,
     pub require_login: bool,
     pub pocketbase_ca_cert: Option<String>,
@@ -79,23 +71,6 @@ pub struct AuthConfig {
 
 impl AuthConfig {
     pub fn from_env() -> Self {
-        let jwt_secret = std::env::var("POCKETBASE_JWT_SECRET").unwrap_or_default();
-        let allow_empty = std::env::var("AUTH_ALLOW_EMPTY_JWT_SECRET")
-            .map(|value| value == "true" || value == "1")
-            .unwrap_or(false);
-
-        if jwt_secret.is_empty() && !allow_empty {
-            panic!(
-                "POCKETBASE_JWT_SECRET is empty. Set a strong secret or set AUTH_ALLOW_EMPTY_JWT_SECRET=true to allow unsafe behavior."
-            );
-        }
-
-        if allow_empty {
-            log::warn!(
-                "⚠️  SECURITY WARNING: AUTH_ALLOW_EMPTY_JWT_SECRET is enabled. This is an EMERGENCY-ONLY setting that disables JWT signature validation. The application is running in an INSECURE configuration. Re-enable proper authentication as soon as possible."
-            );
-        }
-
         let pocketbase_url =
             std::env::var("POCKETBASE_URL").unwrap_or_else(|_| "https://127.0.0.1:8090".into());
 
@@ -130,7 +105,6 @@ impl AuthConfig {
 
         Self {
             pocketbase_url,
-            jwt_secret,
             cookie_secure,
             require_login: std::env::var("AUTH_REQUIRE_LOGIN")
                 .map(|value| value == "true" || value == "1")
@@ -141,7 +115,7 @@ impl AuthConfig {
     }
 
     pub fn is_insecure(&self) -> bool {
-        self.jwt_secret.is_empty() || !self.cookie_secure
+        !self.cookie_secure
     }
 
     pub fn build_client(&self) -> Result<reqwest::Client, reqwest::Error> {
@@ -171,6 +145,13 @@ impl AuthConfig {
             self.pocketbase_url.trim_end_matches('/')
         )
     }
+
+    pub fn auth_refresh_url(&self) -> String {
+        format!(
+            "{}/api/collections/users/auth-refresh",
+            self.pocketbase_url.trim_end_matches('/')
+        )
+    }
 }
 
 pub struct JwtMiddleware {
@@ -183,20 +164,34 @@ impl JwtMiddleware {
     }
 }
 
-pub fn validate_token(
-    token: &str,
-    config: &AuthConfig,
-) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.validate_exp = true;
-    validation.validate_aud = false;
-
-    let key = DecodingKey::from_secret(config.jwt_secret.as_bytes());
-    decode::<Claims>(token, &key, &validation).map(|token_data| token_data.claims)
-}
-
 fn is_public_path(path: &str, config: &AuthConfig) -> bool {
     config.public_paths.iter().any(|p| path == p)
+}
+
+async fn verify_token_with_pocketbase(
+    token: &str,
+    config: &AuthConfig,
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let client = config.build_client()?;
+    let response = client
+        .post(config.auth_refresh_url())
+        .header("Authorization", token)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let pb_res: serde_json::Value = response.json().await.unwrap_or_default();
+        if let Some(new_token) = pb_res.get("token").and_then(|t| t.as_str()) {
+            Ok(Some(new_token.to_string()))
+        } else {
+            Ok(None)
+        }
+    } else {
+        Err(Box::new(std::io::Error::other(format!(
+            "PocketBase auth refresh failed: {}",
+            response.status()
+        ))))
+    }
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtMiddleware
@@ -297,70 +292,65 @@ where
                 }
             }
 
-            // Validate token once and store result for both auth state and authorization
-            let validation_result = token_opt
-                .as_ref()
-                .map(|token| validate_token(token, &config));
-
-            // Set auth state in extensions if token is valid (even on public paths)
-            if let Some(Ok(ref claims)) = validation_result {
-                req.extensions_mut().insert(claims.clone());
-            }
+            // Verify token using PocketBase's auth-refresh endpoint
+            let (token_valid, original_token) = if let Some(ref token) = token_opt {
+                match verify_token_with_pocketbase(token, &config).await {
+                    Ok(Some(new_token)) => {
+                        // Token is valid and was refreshed
+                        info!(
+                            "[AUTH_SUCCESS] Token verified and refreshed for request to {}",
+                            req.path()
+                        );
+                        (Some(new_token), Some(token.clone()))
+                    }
+                    Ok(None) => {
+                        // Token is valid but not refreshed
+                        info!(
+                            "[AUTH_SUCCESS] Token verified for request to {}",
+                            req.path()
+                        );
+                        (Some(token.clone()), Some(token.clone()))
+                    }
+                    Err(_) => {
+                        // Token is invalid
+                        warn!("[AUTH_FAILED] Invalid token for request to {}", req.path());
+                        (None, Some(token.clone()))
+                    }
+                }
+            } else {
+                (None, None)
+            };
 
             if is_public_path(req.path(), &config) {
                 let res = service.call(req).await?;
                 return Ok(res);
             }
 
-            match token_opt {
-                Some(_token) => {
-                    // Token already validated above in validation_result
+            if token_valid.is_none() {
+                if req.path() != "/login" {
+                    info!("[AUTH_REDIRECT] Redirecting unauthorized request to /login");
+                    return Err(AuthRedirectError.into());
                 }
-                None => {
-                    warn!(
-                        "[AUTH_FAILED] No token provided in request to {}",
-                        req.path()
-                    );
-                    if req.path() != "/login" {
-                        info!("[AUTH_REDIRECT] Redirecting unauthorized request to /login");
-                        return Err(AuthRedirectError.into());
-                    }
-                    return Err(ErrorUnauthorized("Unauthorized"));
-                }
-            };
+                return Err(ErrorUnauthorized("Unauthorized"));
+            }
 
-            match validation_result.unwrap() {
-                Ok(claims) => {
-                    info!(
-                        "[AUTH_SUCCESS] Valid token for user {} on {}",
-                        claims.id,
-                        req.path()
-                    );
-                    let res = service.call(req).await?;
-                    Ok(res)
-                }
-                Err(err) => {
-                    if err.kind() == &jsonwebtoken::errors::ErrorKind::ExpiredSignature {
-                        warn!("[AUTH_EXPIRED] Token expired for request to {}", req.path());
-                        if req.path() != "/login" {
-                            info!("[AUTH_REDIRECT] Redirecting expired token request to /login");
-                            return Err(AuthRedirectClearCookieError.into());
-                        }
-                        Err(ErrorUnauthorized("Token expired"))
-                    } else {
-                        warn!(
-                            "[AUTH_FAILED] Token validation failed: {} for request to {}",
-                            err,
-                            req.path()
-                        );
-                        if req.path() != "/login" {
-                            info!("[AUTH_REDIRECT] Redirecting invalid token request to /login");
-                            return Err(AuthRedirectError.into());
-                        }
-                        Err(ErrorUnauthorized("Invalid token"))
+            // If token was refreshed, update the response with new cookie
+            let mut res = service.call(req).await?;
+            if let Some(refreshed_token) = token_valid {
+                if let Some(original) = original_token {
+                    if refreshed_token != original {
+                        let cookie =
+                            actix_web::cookie::Cookie::build("auth_token", refreshed_token)
+                                .path("/")
+                                .http_only(true)
+                                .secure(config.cookie_secure)
+                                .same_site(actix_web::cookie::SameSite::Lax)
+                                .finish();
+                        res.response_mut().add_cookie(&cookie).ok();
                     }
                 }
             }
+            Ok(res)
         })
     }
 }
@@ -637,80 +627,15 @@ pub async fn logout() -> actix_web::Result<HttpResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{encode, EncodingKey, Header};
 
     fn test_config() -> AuthConfig {
         AuthConfig {
             pocketbase_url: "https://127.0.0.1:8090".into(),
-            jwt_secret: "test-secret".into(),
             cookie_secure: true,
             require_login: true,
             pocketbase_ca_cert: None,
             public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
         }
-    }
-
-    fn token_for(claims: Claims, secret: &str) -> String {
-        encode(
-            &Header::new(Algorithm::HS256),
-            &claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
-        )
-        .expect("test token should encode")
-    }
-
-    #[test]
-    fn validates_valid_token() {
-        let config = test_config();
-        let token = token_for(
-            Claims {
-                id: "user-1".into(),
-                exp: 4_102_444_800,
-            },
-            &config.jwt_secret,
-        );
-
-        let claims = validate_token(&token, &config).expect("valid token should decode");
-
-        assert_eq!(claims.id, "user-1");
-    }
-
-    #[test]
-    fn rejects_expired_token() {
-        let config = test_config();
-        let token = token_for(
-            Claims {
-                id: "user-1".into(),
-                exp: 1,
-            },
-            &config.jwt_secret,
-        );
-
-        let err = validate_token(&token, &config).expect_err("expired token should fail");
-
-        assert_eq!(
-            err.kind(),
-            &jsonwebtoken::errors::ErrorKind::ExpiredSignature
-        );
-    }
-
-    #[test]
-    fn rejects_forged_token() {
-        let config = test_config();
-        let token = token_for(
-            Claims {
-                id: "user-1".into(),
-                exp: 4_102_444_800,
-            },
-            "wrong-secret",
-        );
-
-        let err = validate_token(&token, &config).expect_err("forged token should fail");
-
-        assert_eq!(
-            err.kind(),
-            &jsonwebtoken::errors::ErrorKind::InvalidSignature
-        );
     }
 
     #[test]
@@ -741,30 +666,14 @@ mod tests {
     }
 
     #[test]
-    fn fails_fast_on_empty_jwt_secret() {
-        // Test that empty secret is detected as insecure
+    fn is_insecure_detects_insecure_cookie() {
         let config = AuthConfig {
             pocketbase_url: "http://127.0.0.1:8090".into(),
-            jwt_secret: "".into(),
-            cookie_secure: true,
+            cookie_secure: false,
             require_login: true,
             pocketbase_ca_cert: None,
             public_paths: vec!["/login".into()],
         };
         assert!(config.is_insecure());
-    }
-
-    #[test]
-    fn allows_empty_jwt_secret_with_override() {
-        std::env::set_var("POCKETBASE_URL", "http://127.0.0.1:8090");
-        std::env::set_var("POCKETBASE_JWT_SECRET", "");
-        std::env::set_var("AUTH_ALLOW_EMPTY_JWT_SECRET", "true");
-        let config = AuthConfig::from_env();
-        assert!(config.jwt_secret.is_empty());
-        assert!(config.is_insecure());
-        // Cleanup
-        std::env::remove_var("AUTH_ALLOW_EMPTY_JWT_SECRET");
-        std::env::remove_var("POCKETBASE_JWT_SECRET");
-        std::env::remove_var("POCKETBASE_URL");
     }
 }

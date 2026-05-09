@@ -1,6 +1,6 @@
 use actix_multipart::form::MultipartForm;
 use actix_web::dev::Payload;
-use actix_web::{web, FromRequest, HttpMessage, HttpRequest, HttpResponse};
+use actix_web::{web, FromRequest, HttpRequest, HttpResponse};
 use askama::Template;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -456,7 +456,8 @@ pub async fn song_list(
         })
         .collect();
 
-    let is_authenticated = req.extensions().get::<crate::auth::Claims>().is_some();
+    let is_authenticated =
+        req.cookie("auth_token").is_some() || req.headers().get("Authorization").is_some();
 
     let body = SongsTemplate {
         songs: views,
