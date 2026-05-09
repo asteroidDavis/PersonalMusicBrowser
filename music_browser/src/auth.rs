@@ -321,12 +321,9 @@ where
                         "[AUTH_FAILED] No token provided in request to {}",
                         req.path()
                     );
-                    if let Some(accept) = req.headers().get("accept") {
-                        if let Ok(accept_str) = accept.to_str() {
-                            if accept_str.contains("text/html") && req.path() != "/login" {
-                                return Err(AuthRedirectError.into());
-                            }
-                        }
+                    if req.path() != "/login" {
+                        info!("[AUTH_REDIRECT] Redirecting unauthorized request to /login");
+                        return Err(AuthRedirectError.into());
                     }
                     return Err(ErrorUnauthorized("Unauthorized"));
                 }
@@ -345,12 +342,9 @@ where
                 Err(err) => {
                     if err.kind() == &jsonwebtoken::errors::ErrorKind::ExpiredSignature {
                         warn!("[AUTH_EXPIRED] Token expired for request to {}", req.path());
-                        if let Some(accept) = req.headers().get("accept") {
-                            if let Ok(accept_str) = accept.to_str() {
-                                if accept_str.contains("text/html") && req.path() != "/login" {
-                                    return Err(AuthRedirectClearCookieError.into());
-                                }
-                            }
+                        if req.path() != "/login" {
+                            info!("[AUTH_REDIRECT] Redirecting expired token request to /login");
+                            return Err(AuthRedirectClearCookieError.into());
                         }
                         Err(ErrorUnauthorized("Token expired"))
                     } else {
@@ -359,7 +353,11 @@ where
                             err,
                             req.path()
                         );
-                        Err(ErrorUnauthorized("Unauthorized"))
+                        if req.path() != "/login" {
+                            info!("[AUTH_REDIRECT] Redirecting invalid token request to /login");
+                            return Err(AuthRedirectError.into());
+                        }
+                        Err(ErrorUnauthorized("Invalid token"))
                     }
                 }
             }

@@ -212,10 +212,7 @@ async fn auth_middleware_allows_public_auth_routes_and_redirects_protected_html(
     let signup_resp = test::call_service(&app, signup_req).await;
     assert_eq!(signup_resp.status(), StatusCode::OK);
 
-    let protected_req = test::TestRequest::get()
-        .uri("/songs")
-        .insert_header(("Accept", "text/html"))
-        .to_request();
+    let protected_req = test::TestRequest::get().uri("/songs").to_request();
     let protected_resp = test::try_call_service(&app, protected_req)
         .await
         .expect_err("protected HTML request without token should be rejected");
