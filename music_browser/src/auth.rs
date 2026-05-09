@@ -18,17 +18,32 @@ pub struct UserError {
 
 impl UserError {
     const fn new(message: &'static str, log_context: &'static str) -> Self {
-        Self { message, log_context }
+        Self {
+            message,
+            log_context,
+        }
     }
 }
 
 // Error mapping table - maps specific error contexts to user-facing messages
-pub const ERR_INVALID_EMAIL: UserError = UserError::new("Enter a valid email address.", "invalid_email");
-pub const ERR_WEAK_PASSWORD: UserError = UserError::new("Use a password with at least 12 characters.", "weak_password");
-pub const ERR_PASSWORD_MISMATCH: UserError = UserError::new("Passwords do not match.", "password_mismatch");
-pub const ERR_SIGNUP_FAILED: UserError = UserError::new("Signup failed. Check your email and password, then try again.", "signup_failed");
-pub const ERR_SIGNUP_UNAVAILABLE: UserError = UserError::new("Signup service is unavailable. Try again later.", "signup_unavailable");
-pub const ERR_LOGIN_FAILED: UserError = UserError::new("Invalid credentials or server offline", "login_failed");
+pub const ERR_INVALID_EMAIL: UserError =
+    UserError::new("Enter a valid email address.", "invalid_email");
+pub const ERR_WEAK_PASSWORD: UserError = UserError::new(
+    "Use a password with at least 12 characters.",
+    "weak_password",
+);
+pub const ERR_PASSWORD_MISMATCH: UserError =
+    UserError::new("Passwords do not match.", "password_mismatch");
+pub const ERR_SIGNUP_FAILED: UserError = UserError::new(
+    "Signup failed. Check your email and password, then try again.",
+    "signup_failed",
+);
+pub const ERR_SIGNUP_UNAVAILABLE: UserError = UserError::new(
+    "Signup service is unavailable. Try again later.",
+    "signup_unavailable",
+);
+pub const ERR_LOGIN_FAILED: UserError =
+    UserError::new("Invalid credentials or server offline", "login_failed");
 pub const ERR_INVALID_REQUEST: UserError = UserError::new("Invalid request", "invalid_request");
 pub const ERR_INTERNAL_ERROR: UserError = UserError::new("Internal error", "internal_error");
 
@@ -66,8 +81,8 @@ impl AuthConfig {
             );
         }
 
-        let pocketbase_url = std::env::var("POCKETBASE_URL")
-            .unwrap_or_else(|_| "https://127.0.0.1:8090".into());
+        let pocketbase_url =
+            std::env::var("POCKETBASE_URL").unwrap_or_else(|_| "https://127.0.0.1:8090".into());
 
         // Validate URL scheme to prevent SSRF
         if let Err(e) = url::Url::parse(&pocketbase_url) {
@@ -247,8 +262,8 @@ where
             // 1. Try to get token from Authorization header
             if let Some(auth_header) = req.headers().get("Authorization") {
                 if let Ok(auth_str) = auth_header.to_str() {
-                    if auth_str.starts_with("Bearer ") {
-                        token_opt = Some(auth_str[7..].to_string());
+                    if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                        token_opt = Some(token.to_string());
                     }
                 }
             }
@@ -355,9 +370,7 @@ pub struct SignupRequest {
     pub password_confirm: String,
 }
 
-pub async fn login_view(
-    config: web::Data<AuthConfig>,
-) -> actix_web::Result<HttpResponse> {
+pub async fn login_view(config: web::Data<AuthConfig>) -> actix_web::Result<HttpResponse> {
     let tmpl = LoginTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
@@ -368,9 +381,7 @@ pub async fn login_view(
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
-pub async fn signup_view(
-    config: web::Data<AuthConfig>,
-) -> actix_web::Result<HttpResponse> {
+pub async fn signup_view(config: web::Data<AuthConfig>) -> actix_web::Result<HttpResponse> {
     let tmpl = SignupTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
@@ -388,17 +399,26 @@ pub async fn signup_submit(
     let email = form.email.trim().to_lowercase();
 
     if !email.contains('@') || email.len() > 254 {
-        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_INVALID_EMAIL.log_context);
+        warn!(
+            "[AUTH_FAILED] Signup rejected: {}",
+            ERR_INVALID_EMAIL.log_context
+        );
         return signup_error(ERR_INVALID_EMAIL.message);
     }
 
     if form.password.len() < 12 {
-        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_WEAK_PASSWORD.log_context);
+        warn!(
+            "[AUTH_FAILED] Signup rejected: {}",
+            ERR_WEAK_PASSWORD.log_context
+        );
         return signup_error(ERR_WEAK_PASSWORD.message);
     }
 
     if form.password != form.password_confirm {
-        warn!("[AUTH_FAILED] Signup rejected: {}", ERR_PASSWORD_MISMATCH.log_context);
+        warn!(
+            "[AUTH_FAILED] Signup rejected: {}",
+            ERR_PASSWORD_MISMATCH.log_context
+        );
         return signup_error(ERR_PASSWORD_MISMATCH.message);
     }
 
@@ -426,7 +446,11 @@ pub async fn signup_submit(
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            let sanitized_body = body.chars().take(200).collect::<String>().replace('\n', " ");
+            let sanitized_body = body
+                .chars()
+                .take(200)
+                .collect::<String>()
+                .replace('\n', " ");
             warn!(
                 "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
                 status, sanitized_body
@@ -458,7 +482,10 @@ pub async fn login_submit(
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
     if form.identity.trim().is_empty() || form.password.is_empty() {
-        warn!("[AUTH_FAILED] Login rejected: {}", ERR_INVALID_REQUEST.log_context);
+        warn!(
+            "[AUTH_FAILED] Login rejected: {}",
+            ERR_INVALID_REQUEST.log_context
+        );
         return Err(ErrorBadRequest(ERR_INVALID_REQUEST.message));
     }
 
@@ -501,7 +528,11 @@ pub async fn login_submit(
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            let sanitized_body = body.chars().take(200).collect::<String>().replace('\n', " ");
+            let sanitized_body = body
+                .chars()
+                .take(200)
+                .collect::<String>()
+                .replace('\n', " ");
             warn!(
                 "[AUTH_FAILED] PocketBase login rejected with status {}: {}",
                 status, sanitized_body

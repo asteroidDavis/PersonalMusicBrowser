@@ -2,7 +2,7 @@ use actix_web::{middleware, web, App, HttpServer};
 use music_browser::app;
 use music_browser::auth::{self, AuthConfig};
 use music_browser::db::pool;
-use music_browser::jobs::{JobQueue, run_worker};
+use music_browser::jobs::{run_worker, JobQueue};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -23,10 +23,7 @@ async fn main() -> std::io::Result<()> {
 
     let (job_queue, job_receiver) = JobQueue::new(256);
     let job_store = job_queue.store.clone();
-    tokio::spawn(run_worker(
-        job_receiver,
-        job_store.clone(),
-    ));
+    tokio::spawn(run_worker(job_receiver, job_store.clone()));
     let queue_data = web::Data::new(job_queue);
     let store_data = web::Data::new(job_store);
 
@@ -50,4 +47,3 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
-
