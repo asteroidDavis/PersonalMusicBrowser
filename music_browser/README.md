@@ -118,6 +118,13 @@ cargo run --bin music-browser
 | `JOB_STORE_TTL_SECS` | `7200` | TTL (seconds) for job records before eviction |
 | `HYDRATION_TIMEOUT_SECS` | `30` | Wait time (seconds) for cloud placeholder hydration before fallback copy |
 | `HYDRATION_COPY_MAX_BYTES` | `1073741824` | Max bytes allowed for temp copy fallback (0 disables limit) |
+| `POCKETBASE_URL` | `https://127.0.0.1:8090` | PocketBase instance URL for authentication |
+| `POCKETBASE_JWT_SECRET` | (required) | JWT secret key for token validation (fails fast if empty unless AUTH_ALLOW_EMPTY_JWT_SECRET=true) |
+| `AUTH_COOKIE_SECURE` | `true` | Whether auth cookies use the Secure flag (set to false for HTTP-only local dev) |
+| `AUTH_ALLOW_EMPTY_JWT_SECRET` | `false` | Emergency-only: allow empty JWT secret (disables signature validation) |
+| `AUTH_REQUIRE_LOGIN` | `false` | Whether JWT middleware is active (when true, all routes except AUTH_PUBLIC_PATHS require valid tokens) |
+| `AUTH_PUBLIC_PATHS` | `/login,/signup,/logout` | Comma-separated list of public paths that bypass JWT middleware |
+| `POCKETBASE_CA_CERT` | (optional) | Path to custom CA certificate for PocketBase TLS (for self-signed certs) |
 
 ## Database
 
