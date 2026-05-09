@@ -125,6 +125,8 @@ cargo run --bin music-browser
 | `AUTH_REQUIRE_LOGIN` | `false` | Whether JWT middleware is active (when true, all routes except AUTH_PUBLIC_PATHS require valid tokens) |
 | `AUTH_PUBLIC_PATHS` | `/login,/signup,/logout` | Comma-separated list of public paths that bypass JWT middleware |
 | `POCKETBASE_CA_CERT` | (optional) | Path to custom CA certificate for PocketBase TLS (for self-signed certs) |
+| `CSRF_SECRET` | (required) | Secret key for CSRF token validation (32+ bytes recommended) |
+| `CSRF_ENABLED` | `true` | Whether CSRF protection is enabled (set to false for testing) |
 
 ## Database
 

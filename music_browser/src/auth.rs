@@ -1,6 +1,6 @@
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::error::{ErrorBadRequest, ErrorUnauthorized};
-use actix_web::{web, Error, HttpMessage, HttpResponse, ResponseError};
+use actix_web::{web, Error, HttpMessage, HttpRequest, HttpResponse, ResponseError};
 use askama::Template;
 use futures_util::future::LocalBoxFuture;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
@@ -8,6 +8,8 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 use std::rc::Rc;
+
+use actix_csrf_middleware::CsrfToken;
 
 // Security constants
 const MIN_PASSWORD_LENGTH: usize = 12;
@@ -372,6 +374,7 @@ where
 pub struct LoginTemplate {
     pub error_message: Option<String>,
     pub is_insecure: bool,
+    pub csrf_token: String,
 }
 
 #[derive(Template)]
@@ -379,6 +382,7 @@ pub struct LoginTemplate {
 pub struct SignupTemplate {
     pub error_message: Option<String>,
     pub is_insecure: bool,
+    pub csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -394,10 +398,21 @@ pub struct SignupRequest {
     pub password_confirm: String,
 }
 
-pub async fn login_view(config: web::Data<AuthConfig>) -> actix_web::Result<HttpResponse> {
+pub async fn login_view(
+    req: HttpRequest,
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
+    // Try to extract CSRF token if middleware is present
+    let csrf_token = req
+        .extensions()
+        .get::<CsrfToken>()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
+
     let tmpl = LoginTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
+        csrf_token,
     };
     let html = tmpl
         .render()
@@ -405,10 +420,21 @@ pub async fn login_view(config: web::Data<AuthConfig>) -> actix_web::Result<Http
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
-pub async fn signup_view(config: web::Data<AuthConfig>) -> actix_web::Result<HttpResponse> {
+pub async fn signup_view(
+    req: HttpRequest,
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
+    // Try to extract CSRF token if middleware is present
+    let csrf_token = req
+        .extensions()
+        .get::<CsrfToken>()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
+
     let tmpl = SignupTemplate {
         error_message: None,
         is_insecure: config.is_insecure(),
+        csrf_token,
     };
     let html = tmpl
         .render()
@@ -418,16 +444,22 @@ pub async fn signup_view(config: web::Data<AuthConfig>) -> actix_web::Result<Htt
 
 pub async fn signup_submit(
     form: web::Form<SignupRequest>,
+    req: HttpRequest,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
     let email = form.email.trim().to_lowercase();
+    let csrf_token = req
+        .extensions()
+        .get::<CsrfToken>()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
 
     if !email.contains('@') || email.len() > MAX_EMAIL_LENGTH {
         warn!(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_INVALID_EMAIL.log_context
         );
-        return signup_error(ERR_INVALID_EMAIL.message, &config);
+        return signup_error(ERR_INVALID_EMAIL.message, csrf_token);
     }
 
     if form.password.len() < MIN_PASSWORD_LENGTH {
@@ -435,7 +467,7 @@ pub async fn signup_submit(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_WEAK_PASSWORD.log_context
         );
-        return signup_error(ERR_WEAK_PASSWORD.message, &config);
+        return signup_error(ERR_WEAK_PASSWORD.message, csrf_token);
     }
 
     if form.password != form.password_confirm {
@@ -443,7 +475,7 @@ pub async fn signup_submit(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_PASSWORD_MISMATCH.log_context
         );
-        return signup_error(ERR_PASSWORD_MISMATCH.message, &config);
+        return signup_error(ERR_PASSWORD_MISMATCH.message, csrf_token);
     }
 
     let client = config.build_client().map_err(|e| {
@@ -479,19 +511,20 @@ pub async fn signup_submit(
                 "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
                 status, sanitized_body
             );
-            signup_error(ERR_SIGNUP_FAILED.message, &config)
+            signup_error(ERR_SIGNUP_FAILED.message, csrf_token)
         }
         Err(e) => {
             warn!("[AUTH_FAILED] PocketBase signup connection error: {}", e);
-            signup_error(ERR_SIGNUP_UNAVAILABLE.message, &config)
+            signup_error(ERR_SIGNUP_UNAVAILABLE.message, csrf_token)
         }
     }
 }
 
-fn signup_error(message: &str, config: &AuthConfig) -> actix_web::Result<HttpResponse> {
+fn signup_error(message: &str, csrf_token: String) -> actix_web::Result<HttpResponse> {
     let tmpl = SignupTemplate {
         error_message: Some(message.into()),
-        is_insecure: config.is_insecure(),
+        is_insecure: false,
+        csrf_token,
     };
     let html = tmpl
         .render()
@@ -503,8 +536,15 @@ fn signup_error(message: &str, config: &AuthConfig) -> actix_web::Result<HttpRes
 
 pub async fn login_submit(
     form: web::Form<LoginRequest>,
+    req: HttpRequest,
     config: web::Data<AuthConfig>,
 ) -> actix_web::Result<HttpResponse> {
+    let csrf_token = req
+        .extensions()
+        .get::<CsrfToken>()
+        .map(|t| t.0.clone())
+        .unwrap_or_default();
+
     if form.identity.trim().is_empty() || form.password.is_empty() {
         warn!(
             "[AUTH_FAILED] Login rejected: {}",
@@ -570,6 +610,7 @@ pub async fn login_submit(
     let tmpl = LoginTemplate {
         error_message: Some(ERR_LOGIN_FAILED.message.into()),
         is_insecure: false,
+        csrf_token,
     };
     let html = tmpl
         .render()

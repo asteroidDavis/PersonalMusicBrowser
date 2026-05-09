@@ -1,4 +1,6 @@
 use actix_web::{middleware, web, App, HttpServer};
+
+use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
 use music_browser::app;
 use music_browser::auth::{self, AuthConfig};
 use music_browser::db::pool;
@@ -21,6 +23,22 @@ async fn main() -> std::io::Result<()> {
     let auth_config = AuthConfig::from_env();
     let auth_data = web::Data::new(auth_config.clone());
 
+    // CSRF middleware configuration (can be disabled via CSRF_ENABLED=false for testing)
+    let csrf_enabled = std::env::var("CSRF_ENABLED")
+        .unwrap_or_else(|_| "true".to_string())
+        .parse::<bool>()
+        .unwrap_or(true);
+    let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(
+        std::env::var("CSRF_SECRET")
+            .unwrap_or_else(|_| "change-me-to-a-secure-random-32-byte-secret".to_string())
+            .as_bytes(),
+    )
+    .with_skip_for(vec![
+        "/login".to_string(),
+        "/signup".to_string(),
+        "/logout".to_string(),
+    ]);
+
     let (job_queue, job_receiver) = JobQueue::new(256);
     let job_store = job_queue.store.clone();
     tokio::spawn(run_worker(job_receiver, job_store.clone()));
@@ -33,6 +51,10 @@ async fn main() -> std::io::Result<()> {
         let request_auth = auth_data.require_login;
 
         App::new()
+            .wrap(middleware::Condition::new(
+                csrf_enabled,
+                CsrfMiddleware::new(csrf_config.clone()),
+            ))
             .wrap(middleware::Condition::new(
                 request_auth,
                 auth::JwtMiddleware::new(auth_data.get_ref().clone()),
