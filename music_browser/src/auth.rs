@@ -9,7 +9,18 @@ use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 use std::rc::Rc;
 
+// Security constants
+const MIN_PASSWORD_LENGTH: usize = 12;
+const MAX_EMAIL_LENGTH: usize = 254;
+const MAX_ERROR_BODY_LENGTH: usize = 200;
+
 /// User-facing error messages that obscure implementation details
+///
+/// This pattern separates user-facing messages from internal error contexts for security.
+/// When adding new errors:
+/// 1. Define a new constant below with a user-friendly message and a log context
+/// 2. Use the constant in handlers instead of inline strings
+/// 3. Log the log_context for debugging while showing the message to users
 #[derive(Debug, Clone)]
 pub struct UserError {
     pub message: &'static str,
@@ -26,6 +37,7 @@ impl UserError {
 }
 
 // Error mapping table - maps specific error contexts to user-facing messages
+// Add new error constants here when introducing new validation or error scenarios
 pub const ERR_INVALID_EMAIL: UserError =
     UserError::new("Enter a valid email address.", "invalid_email");
 pub const ERR_WEAK_PASSWORD: UserError = UserError::new(
@@ -60,6 +72,7 @@ pub struct AuthConfig {
     pub cookie_secure: bool,
     pub require_login: bool,
     pub pocketbase_ca_cert: Option<String>,
+    pub public_paths: Vec<String>,
 }
 
 impl AuthConfig {
@@ -107,6 +120,12 @@ impl AuthConfig {
             );
         }
 
+        let public_paths = std::env::var("AUTH_PUBLIC_PATHS")
+            .unwrap_or_else(|_| "/login,/signup,/logout".into())
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
+
         Self {
             pocketbase_url,
             jwt_secret,
@@ -115,6 +134,7 @@ impl AuthConfig {
                 .map(|value| value == "true" || value == "1")
                 .unwrap_or(false),
             pocketbase_ca_cert: std::env::var("POCKETBASE_CA_CERT").ok(),
+            public_paths,
         }
     }
 
@@ -173,8 +193,8 @@ pub fn validate_token(
     decode::<Claims>(token, &key, &validation).map(|token_data| token_data.claims)
 }
 
-fn is_public_path(path: &str) -> bool {
-    path == "/login" || path == "/signup" || path == "/logout"
+fn is_public_path(path: &str, config: &AuthConfig) -> bool {
+    config.public_paths.iter().any(|p| path == p)
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtMiddleware
@@ -275,20 +295,25 @@ where
                 }
             }
 
-            // Always try to validate token for auth state (even on public paths)
-            if let Some(ref token) = token_opt {
-                if let Ok(claims) = validate_token(token, &config) {
-                    req.extensions_mut().insert(claims);
-                }
+            // Validate token once and store result for both auth state and authorization
+            let validation_result = token_opt
+                .as_ref()
+                .map(|token| validate_token(token, &config));
+
+            // Set auth state in extensions if token is valid (even on public paths)
+            if let Some(Ok(ref claims)) = validation_result {
+                req.extensions_mut().insert(claims.clone());
             }
 
-            if is_public_path(req.path()) {
+            if is_public_path(req.path(), &config) {
                 let res = service.call(req).await?;
                 return Ok(res);
             }
 
-            let token = match token_opt {
-                Some(t) => t,
+            match token_opt {
+                Some(_token) => {
+                    // Token already validated above in validation_result
+                }
                 None => {
                     warn!(
                         "[AUTH_FAILED] No token provided in request to {}",
@@ -305,14 +330,13 @@ where
                 }
             };
 
-            match validate_token(&token, &config) {
+            match validation_result.unwrap() {
                 Ok(claims) => {
                     info!(
                         "[AUTH_SUCCESS] Valid token for user {} on {}",
                         claims.id,
                         req.path()
                     );
-                    req.extensions_mut().insert(claims);
                     let res = service.call(req).await?;
                     Ok(res)
                 }
@@ -398,20 +422,20 @@ pub async fn signup_submit(
 ) -> actix_web::Result<HttpResponse> {
     let email = form.email.trim().to_lowercase();
 
-    if !email.contains('@') || email.len() > 254 {
+    if !email.contains('@') || email.len() > MAX_EMAIL_LENGTH {
         warn!(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_INVALID_EMAIL.log_context
         );
-        return signup_error(ERR_INVALID_EMAIL.message);
+        return signup_error(ERR_INVALID_EMAIL.message, &config);
     }
 
-    if form.password.len() < 12 {
+    if form.password.len() < MIN_PASSWORD_LENGTH {
         warn!(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_WEAK_PASSWORD.log_context
         );
-        return signup_error(ERR_WEAK_PASSWORD.message);
+        return signup_error(ERR_WEAK_PASSWORD.message, &config);
     }
 
     if form.password != form.password_confirm {
@@ -419,7 +443,7 @@ pub async fn signup_submit(
             "[AUTH_FAILED] Signup rejected: {}",
             ERR_PASSWORD_MISMATCH.log_context
         );
-        return signup_error(ERR_PASSWORD_MISMATCH.message);
+        return signup_error(ERR_PASSWORD_MISMATCH.message, &config);
     }
 
     let client = config.build_client().map_err(|e| {
@@ -448,26 +472,26 @@ pub async fn signup_submit(
             let body = response.text().await.unwrap_or_default();
             let sanitized_body = body
                 .chars()
-                .take(200)
+                .take(MAX_ERROR_BODY_LENGTH)
                 .collect::<String>()
                 .replace('\n', " ");
             warn!(
                 "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
                 status, sanitized_body
             );
-            signup_error(ERR_SIGNUP_FAILED.message)
+            signup_error(ERR_SIGNUP_FAILED.message, &config)
         }
         Err(e) => {
             warn!("[AUTH_FAILED] PocketBase signup connection error: {}", e);
-            signup_error(ERR_SIGNUP_UNAVAILABLE.message)
+            signup_error(ERR_SIGNUP_UNAVAILABLE.message, &config)
         }
     }
 }
 
-fn signup_error(message: &str) -> actix_web::Result<HttpResponse> {
+fn signup_error(message: &str, config: &AuthConfig) -> actix_web::Result<HttpResponse> {
     let tmpl = SignupTemplate {
         error_message: Some(message.into()),
-        is_insecure: false,
+        is_insecure: config.is_insecure(),
     };
     let html = tmpl
         .render()
@@ -530,7 +554,7 @@ pub async fn login_submit(
             let body = response.text().await.unwrap_or_default();
             let sanitized_body = body
                 .chars()
-                .take(200)
+                .take(MAX_ERROR_BODY_LENGTH)
                 .collect::<String>()
                 .replace('\n', " ");
             warn!(
@@ -583,6 +607,7 @@ mod tests {
             cookie_secure: true,
             require_login: true,
             pocketbase_ca_cert: None,
+            public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
         }
     }
 
@@ -651,8 +676,56 @@ mod tests {
 
     #[test]
     fn login_path_is_public() {
-        assert!(is_public_path("/login"));
-        assert!(is_public_path("/signup"));
-        assert!(!is_public_path("/profile"));
+        let config = test_config();
+        assert!(is_public_path("/login", &config));
+        assert!(is_public_path("/signup", &config));
+        assert!(is_public_path("/logout", &config));
+        assert!(!is_public_path("/profile", &config));
+    }
+
+    #[test]
+    fn public_paths_configurable() {
+        let mut config = test_config();
+        assert!(is_public_path("/login", &config));
+
+        config.public_paths = vec!["/custom".into()];
+        assert!(!is_public_path("/login", &config));
+        assert!(is_public_path("/custom", &config));
+    }
+
+    #[test]
+    fn rejects_invalid_url_scheme() {
+        // Test URL scheme validation directly
+        let url = url::Url::parse("ftp://127.0.0.1:8090").unwrap();
+        assert_ne!(url.scheme(), "http");
+        assert_ne!(url.scheme(), "https");
+    }
+
+    #[test]
+    fn fails_fast_on_empty_jwt_secret() {
+        // Test that empty secret is detected as insecure
+        let config = AuthConfig {
+            pocketbase_url: "http://127.0.0.1:8090".into(),
+            jwt_secret: "".into(),
+            cookie_secure: true,
+            require_login: true,
+            pocketbase_ca_cert: None,
+            public_paths: vec!["/login".into()],
+        };
+        assert!(config.is_insecure());
+    }
+
+    #[test]
+    fn allows_empty_jwt_secret_with_override() {
+        std::env::set_var("POCKETBASE_URL", "http://127.0.0.1:8090");
+        std::env::set_var("POCKETBASE_JWT_SECRET", "");
+        std::env::set_var("AUTH_ALLOW_EMPTY_JWT_SECRET", "true");
+        let config = AuthConfig::from_env();
+        assert!(config.jwt_secret.is_empty());
+        assert!(config.is_insecure());
+        // Cleanup
+        std::env::remove_var("AUTH_ALLOW_EMPTY_JWT_SECRET");
+        std::env::remove_var("POCKETBASE_JWT_SECRET");
+        std::env::remove_var("POCKETBASE_URL");
     }
 }

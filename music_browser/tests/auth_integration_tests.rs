@@ -10,6 +10,7 @@ fn test_auth_config(pocketbase_url: String) -> AuthConfig {
         cookie_secure: false,
         require_login: true,
         pocketbase_ca_cert: None,
+        public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
     }
 }
 

@@ -320,7 +320,9 @@ music_browser/
 │   └── install-hooks.sh       # Pre-commit hook installer
 ├── src/
 │   ├── lib.rs                 # Library crate (shared db module)
-│   ├── main.rs                # Actix-web server, routes, handlers
+│   ├── main.rs                # Launches database pool, jobs workflow, and webserver
+│   ├── app.rs                 # Starts webserver and connects to jobs queue and database pool
+│   ├── auth.rs                # JWT authentication middleware and handlers
 │   ├── bulk_import.rs         # CLI: bulk import from markdown/SQLite
 │   └── db/
 │       ├── mod.rs             # Module declarations
@@ -339,9 +341,12 @@ music_browser/
 │   ├── instrument_form.html   # Create instrument
 │   ├── bands.html             # Band list
 │   ├── band_form.html         # Create band
+│   ├── login.html             # Login page
+│   ├── signup.html            # Signup page
 │   └── recordings.html        # Recording list
 └── tests/
-    └── db_tests.rs            # Database integration tests (29 tests)
+    ├── db_tests.rs            # Database integration tests (29 tests)
+    └── auth_integration_tests.rs  # Auth integration tests
 ```
 
 ## Tech Stack
