@@ -20,6 +20,8 @@ pub struct AuthConfig {
     pub pocketbase_url: String,
     pub jwt_secret: String,
     pub cookie_secure: bool,
+    pub require_login: bool,
+    pub pocketbase_ca_cert: Option<String>,
 }
 
 impl AuthConfig {
@@ -42,12 +44,37 @@ impl AuthConfig {
             cookie_secure: std::env::var("AUTH_COOKIE_SECURE")
                 .map(|value| value == "true" || value == "1")
                 .unwrap_or(true),
+            require_login: std::env::var("AUTH_REQUIRE_LOGIN")
+                .map(|value| value == "true" || value == "1")
+                .unwrap_or(false),
+            pocketbase_ca_cert: std::env::var("POCKETBASE_CA_CERT").ok(),
         }
+    }
+
+    pub fn build_client(&self) -> Result<reqwest::Client, reqwest::Error> {
+        let mut builder = reqwest::Client::builder();
+        if let Some(ref ca_path) = self.pocketbase_ca_cert {
+            if !ca_path.is_empty() {
+                let cert_pem = std::fs::read_to_string(ca_path)
+                    .expect("Failed to read POCKETBASE_CA_CERT file");
+                let cert = reqwest::Certificate::from_pem(cert_pem.as_bytes())
+                    .expect("Failed to parse POCKETBASE_CA_CERT PEM");
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+        builder.build()
     }
 
     pub fn auth_with_password_url(&self) -> String {
         format!(
             "{}/api/collections/users/auth-with-password",
+            self.pocketbase_url.trim_end_matches('/')
+        )
+    }
+
+    pub fn users_records_url(&self) -> String {
+        format!(
+            "{}/api/collections/users/records",
             self.pocketbase_url.trim_end_matches('/')
         )
     }
@@ -73,6 +100,10 @@ pub fn validate_token(
 
     let key = DecodingKey::from_secret(config.jwt_secret.as_bytes());
     decode::<Claims>(token, &key, &validation).map(|token_data| token_data.claims)
+}
+
+fn is_public_path(path: &str) -> bool {
+    path == "/login" || path == "/signup"
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtMiddleware
@@ -173,6 +204,18 @@ where
                 }
             }
 
+            // Always try to validate token for auth state (even on public paths)
+            if let Some(ref token) = token_opt {
+                if let Ok(claims) = validate_token(token, &config) {
+                    req.extensions_mut().insert(claims);
+                }
+            }
+
+            if is_public_path(req.path()) {
+                let res = service.call(req).await?;
+                return Ok(res);
+            }
+
             let token = match token_opt {
                 Some(t) => t,
                 None => {
@@ -235,10 +278,23 @@ pub struct LoginTemplate {
     pub error_message: Option<String>,
 }
 
+#[derive(Template)]
+#[template(path = "signup.html")]
+pub struct SignupTemplate {
+    pub error_message: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub identity: String,
     pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct SignupRequest {
+    pub email: String,
+    pub password: String,
+    pub password_confirm: String,
 }
 
 pub async fn login_view() -> actix_web::Result<HttpResponse> {
@@ -251,6 +307,86 @@ pub async fn login_view() -> actix_web::Result<HttpResponse> {
     Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
+pub async fn signup_view() -> actix_web::Result<HttpResponse> {
+    let tmpl = SignupTemplate {
+        error_message: None,
+    };
+    let html = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
+}
+
+pub async fn signup_submit(
+    form: web::Form<SignupRequest>,
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
+    let email = form.email.trim().to_lowercase();
+
+    if !email.contains('@') || email.len() > 254 {
+        warn!("[AUTH_FAILED] Signup rejected for invalid email.");
+        return signup_error("Enter a valid email address.");
+    }
+
+    if form.password.len() < 12 {
+        warn!("[AUTH_FAILED] Signup rejected for weak password.");
+        return signup_error("Use a password with at least 12 characters.");
+    }
+
+    if form.password != form.password_confirm {
+        warn!("[AUTH_FAILED] Signup rejected for password mismatch.");
+        return signup_error("Passwords do not match.");
+    }
+
+    let client = config.build_client().map_err(|e| {
+        warn!("[AUTH_FAILED] Failed to build HTTP client: {}", e);
+        actix_web::error::ErrorInternalServerError("Internal error")
+    })?;
+    let res = client
+        .post(config.users_records_url())
+        .json(&serde_json::json!({
+            "email": email,
+            "password": form.password,
+            "passwordConfirm": form.password_confirm
+        }))
+        .send()
+        .await;
+
+    match res {
+        Ok(response) if response.status().is_success() => {
+            info!("[AUTH_SUCCESS] User signup completed.");
+            Ok(HttpResponse::SeeOther()
+                .append_header(("Location", "/login"))
+                .finish())
+        }
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            warn!(
+                "[AUTH_FAILED] PocketBase signup rejected with status {}: {}",
+                status, body
+            );
+            signup_error("Signup failed. Check your email and password, then try again.")
+        }
+        Err(e) => {
+            warn!("[AUTH_FAILED] PocketBase signup connection error: {}", e);
+            signup_error("Signup service is unavailable. Try again later.")
+        }
+    }
+}
+
+fn signup_error(message: &str) -> actix_web::Result<HttpResponse> {
+    let tmpl = SignupTemplate {
+        error_message: Some(message.into()),
+    };
+    let html = tmpl
+        .render()
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    Ok(HttpResponse::BadRequest()
+        .content_type("text/html")
+        .body(html))
+}
+
 pub async fn login_submit(
     form: web::Form<LoginRequest>,
     config: web::Data<AuthConfig>,
@@ -260,7 +396,10 @@ pub async fn login_submit(
         return Err(ErrorBadRequest("Invalid login request"));
     }
 
-    let client = reqwest::Client::new();
+    let client = config.build_client().map_err(|e| {
+        warn!("[AUTH_FAILED] Failed to build HTTP client: {}", e);
+        actix_web::error::ErrorInternalServerError("Internal error")
+    })?;
     let res = client
         .post(config.auth_with_password_url())
         .json(&serde_json::json!({
@@ -281,14 +420,27 @@ pub async fn login_submit(
                     .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
 
+                let flag_cookie = actix_web::cookie::Cookie::build("auth_present", "1")
+                    .path("/")
+                    .same_site(actix_web::cookie::SameSite::Lax)
+                    .finish();
                 return Ok(HttpResponse::SeeOther()
                     .append_header(("Location", "/"))
                     .cookie(cookie)
+                    .cookie(flag_cookie)
                     .finish());
             }
         }
-        _ => {
-            warn!("[AUTH_FAILED] PocketBase login failed or unreachable.");
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            warn!(
+                "[AUTH_FAILED] PocketBase login rejected with status {}: {}",
+                status, body
+            );
+        }
+        Err(e) => {
+            warn!("[AUTH_FAILED] PocketBase login connection error: {}", e);
         }
     }
 
@@ -308,9 +460,14 @@ pub async fn logout() -> actix_web::Result<HttpResponse> {
     cookie.make_removal();
     cookie.set_path("/");
 
+    let mut flag_cookie = actix_web::cookie::Cookie::named("auth_present");
+    flag_cookie.make_removal();
+    flag_cookie.set_path("/");
+
     Ok(HttpResponse::SeeOther()
         .append_header(("Location", "/login"))
         .cookie(cookie)
+        .cookie(flag_cookie)
         .finish())
 }
 
@@ -324,6 +481,8 @@ mod tests {
             pocketbase_url: "https://127.0.0.1:8090".into(),
             jwt_secret: "test-secret".into(),
             cookie_secure: true,
+            require_login: true,
+            pocketbase_ca_cert: None,
         }
     }
 
@@ -388,5 +547,12 @@ mod tests {
             err.kind(),
             &jsonwebtoken::errors::ErrorKind::InvalidSignature
         );
+    }
+
+    #[test]
+    fn login_path_is_public() {
+        assert!(is_public_path("/login"));
+        assert!(is_public_path("/signup"));
+        assert!(!is_public_path("/profile"));
     }
 }

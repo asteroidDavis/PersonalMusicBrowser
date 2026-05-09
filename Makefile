@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run pocketbase-run
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run pocketbase-run pocketbase-run-insecure
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -32,18 +32,38 @@ rust-clean:
 rust-run:
 	@. ~/.cargo/env && cd music_browser && cargo run --bin music-browser
 
-pocketbase-run:
+pocketbase-cert:
+	@openssl req -x509 -newkey rsa:2048 -keyout pocketbase/localhost.key \
+		-out pocketbase/localhost.crt -days 365 -nodes \
+		-subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1"
+	@echo ""
+	@echo "Generated: pocketbase/localhost.crt and pocketbase/localhost.key"
+	@echo ""
+	@echo "Add these to your music_browser/.env file:"
+	@echo "  POCKETBASE_CA_CERT=pocketbase/localhost.crt"
+	@echo "  POCKETBASE_URL=https://127.0.0.1:8090"
+	@echo ""
+	@echo "Then run: make pocketbase-run"
+
+pocketbase-run-insecure:
 	@if [ -x pocketbase/pocketbase ]; then \
 		POCKETBASE_BIN=pocketbase/pocketbase; \
 	else \
 		POCKETBASE_BIN=pocketbase; \
 	fi; \
-	CERT_PATH=$${POCKETBASE_CERT_PATH:-pocketbase/localhost+2.pem}; \
-	KEY_PATH=$${POCKETBASE_KEY_PATH:-pocketbase/localhost+2-key.pem}; \
-	if [ -f "$$CERT_PATH" ] && [ -f "$$KEY_PATH" ]; then \
-		$$POCKETBASE_BIN serve --dir pocketbase/pb_data --https 127.0.0.1:8090 "$$CERT_PATH" "$$KEY_PATH"; \
-	else \
-		echo "TLS certificate files not found; starting PocketBase over HTTP for bootstrap."; \
-		echo "Set POCKETBASE_CERT_PATH and POCKETBASE_KEY_PATH or create pocketbase/localhost+2.pem and pocketbase/localhost+2-key.pem."; \
-		$$POCKETBASE_BIN serve --dir pocketbase/pb_data --http 127.0.0.1:8090; \
+	echo "Starting PocketBase on HTTP (insecure, for local development only)."; \
+	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --http 127.0.0.1:8090
+
+pocketbase-run:
+	@if [ ! -f pocketbase/localhost.crt ] || [ ! -f pocketbase/localhost.key ]; then \
+		echo "Error: pocketbase/localhost.crt or pocketbase/localhost.key not found."; \
+		echo "Run: make pocketbase-cert"; \
+		exit 1; \
 	fi
+	@if [ -x pocketbase/pocketbase ]; then \
+		POCKETBASE_BIN=pocketbase/pocketbase; \
+	else \
+		POCKETBASE_BIN=pocketbase; \
+	fi; \
+	echo "Starting PocketBase on HTTPS (beta, untested)."; \
+	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --cert pocketbase/localhost.crt --key pocketbase/localhost.key 127.0.0.1:8090
