@@ -60,7 +60,9 @@ impl<T: DeserializeOwned + 'static> FromRequest for QsForm<T> {
 #[template(path = "songs.html")]
 pub struct SongsTemplate {
     pub songs: Vec<SongView>,
+    #[allow(dead_code)]
     pub is_authenticated: bool,
+    pub csrf_token: String,
 }
 
 pub struct SongView {
@@ -76,6 +78,7 @@ pub struct SongView {
 #[template(path = "song_form.html")]
 struct SongFormTemplate {
     editing: bool,
+    csrf_token: String,
     title: String,
     album_id: i64,
     song_type: String,
@@ -102,11 +105,13 @@ struct ArtistRow {
 #[template(path = "albums.html")]
 struct AlbumsTemplate {
     albums: Vec<Album>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "album_form.html")]
 struct AlbumFormTemplate {
+    csrf_token: String,
     title: String,
     released: bool,
     url: String,
@@ -116,6 +121,7 @@ struct AlbumFormTemplate {
 #[template(path = "artists.html")]
 struct ArtistsTemplate {
     artists: Vec<ArtistView>,
+    csrf_token: String,
 }
 
 pub struct ArtistView {
@@ -127,6 +133,7 @@ pub struct ArtistView {
 #[derive(Template)]
 #[template(path = "artist_form.html")]
 struct ArtistFormTemplate {
+    csrf_token: String,
     name: String,
     bands: Vec<BandRow>,
 }
@@ -141,11 +148,13 @@ struct BandRow {
 #[template(path = "instruments.html")]
 struct InstrumentsTemplate {
     instruments: Vec<Instrument>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "instrument_form.html")]
 struct InstrumentFormTemplate {
+    csrf_token: String,
     name: String,
     instrument_type: String,
 }
@@ -154,6 +163,7 @@ struct InstrumentFormTemplate {
 #[template(path = "recordings.html")]
 struct RecordingsTemplate {
     recordings: Vec<RecordingView>,
+    csrf_token: String,
 }
 
 struct RecordingView {
@@ -168,11 +178,13 @@ struct RecordingView {
 #[template(path = "bands.html")]
 struct BandsTemplate {
     bands: Vec<Band>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "band_form.html")]
 struct BandFormTemplate {
+    csrf_token: String,
     name: String,
 }
 
@@ -184,6 +196,7 @@ struct BandFormTemplate {
 #[template(path = "jobs.html")]
 struct JobsTemplate {
     jobs: Vec<JobRowView>,
+    csrf_token: String,
 }
 
 struct JobRowView {
@@ -204,6 +217,7 @@ struct JobDetailTemplate {
     row: JobRowView,
     log_lines: Vec<String>,
     prefill_json: String,
+    csrf_token: String,
 }
 
 fn job_to_row(r: &JobRecord) -> JobRowView {
@@ -234,6 +248,7 @@ fn job_to_row(r: &JobRecord) -> JobRowView {
 #[template(path = "production.html")]
 struct ProductionTemplate {
     songs: Vec<ProductionSongView>,
+    csrf_token: String,
 }
 
 struct ProductionSongView {
@@ -275,6 +290,7 @@ struct FileView {
 #[template(path = "practice.html")]
 struct PracticeTemplate {
     songs: Vec<PracticeSongView>,
+    csrf_token: String,
 }
 
 struct PracticeSongView {
@@ -311,12 +327,14 @@ struct PresetView {
 #[derive(Template)]
 #[template(path = "stage_form.html")]
 struct StageFormTemplate {
+    csrf_token: String,
     song_title: String,
 }
 
 #[derive(Template)]
 #[template(path = "step_form.html")]
 struct StepFormTemplate {
+    csrf_token: String,
     stage_name: String,
     instruments: Vec<Instrument>,
 }
@@ -324,9 +342,10 @@ struct StepFormTemplate {
 #[derive(Template)]
 #[template(path = "song_file_form.html")]
 struct SongFileFormTemplate {
+    csrf_token: String,
     song_title: String,
-    instruments: Vec<Instrument>,
     return_to: String,
+    instruments: Vec<Instrument>,
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +453,7 @@ pub struct SongFileFormData {
 pub async fn song_list(
     pool: web::Data<SqlitePool>,
     req: HttpRequest,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let songs = queries::list_songs(&pool)
         .await
@@ -462,13 +482,17 @@ pub async fn song_list(
     let body = SongsTemplate {
         songs: views,
         is_authenticated,
+        csrf_token: _csrf.0,
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn song_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn song_new(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let albums = queries::list_albums(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -478,6 +502,7 @@ pub async fn song_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResp
 
     let body = SongFormTemplate {
         editing: false,
+        csrf_token: _csrf.0,
         title: String::new(),
         album_id: 0,
         song_type: "song".into(),
@@ -544,6 +569,7 @@ pub async fn song_edit(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     query: web::Query<std::collections::HashMap<String, String>>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
     let return_to = query.get("return_to").cloned().unwrap_or_default();
@@ -563,6 +589,7 @@ pub async fn song_edit(
 
     let body = SongFormTemplate {
         editing: true,
+        csrf_token: _csrf.0,
         title: song.title,
         album_id: song.album_id.unwrap_or(0),
         song_type: song.song_type.to_string(),
@@ -642,6 +669,7 @@ pub async fn song_update(
 pub async fn song_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_song(&pool, path.into_inner())
         .await
@@ -655,18 +683,25 @@ pub async fn song_delete(
 // Handlers — Albums
 // ---------------------------------------------------------------------------
 
-pub async fn album_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn album_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let albums = queries::list_albums(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = AlbumsTemplate { albums }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = AlbumsTemplate {
+        albums,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn album_new() -> actix_web::Result<HttpResponse> {
+pub async fn album_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Result<HttpResponse> {
     let body = AlbumFormTemplate {
+        csrf_token: _csrf.0,
         title: String::new(),
         released: false,
         url: String::new(),
@@ -697,6 +732,7 @@ pub async fn album_create(
 pub async fn album_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_album(&pool, path.into_inner())
         .await
@@ -710,7 +746,10 @@ pub async fn album_delete(
 // Handlers — Artists
 // ---------------------------------------------------------------------------
 
-pub async fn artist_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn artist_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let artists = queries::list_artists(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -727,17 +766,24 @@ pub async fn artist_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpR
                 .join(", "),
         })
         .collect();
-    let body = ArtistsTemplate { artists: views }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ArtistsTemplate {
+        artists: views,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn artist_new(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn artist_new(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let bands = queries::list_bands(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     let body = ArtistFormTemplate {
+        csrf_token: _csrf.0,
         name: String::new(),
         bands: bands
             .into_iter()
@@ -773,6 +819,7 @@ pub async fn artist_create(
 pub async fn artist_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_artist(&pool, path.into_inner())
         .await
@@ -786,18 +833,27 @@ pub async fn artist_delete(
 // Handlers — Instruments
 // ---------------------------------------------------------------------------
 
-pub async fn instrument_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn instrument_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let instruments = queries::list_instruments(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = InstrumentsTemplate { instruments }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = InstrumentsTemplate {
+        instruments,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn instrument_new() -> actix_web::Result<HttpResponse> {
+pub async fn instrument_new(
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let body = InstrumentFormTemplate {
+        csrf_token: _csrf.0,
         name: String::new(),
         instrument_type: "other".into(),
     }
@@ -830,6 +886,7 @@ pub async fn instrument_create(
 pub async fn instrument_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_instrument(&pool, path.into_inner())
         .await
@@ -843,7 +900,10 @@ pub async fn instrument_delete(
 // Handlers — Recordings
 // ---------------------------------------------------------------------------
 
-pub async fn recording_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn recording_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let recordings = queries::list_recordings(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -870,15 +930,19 @@ pub async fn recording_list(pool: web::Data<SqlitePool>) -> actix_web::Result<Ht
                 .join(", "),
         })
         .collect();
-    let body = RecordingsTemplate { recordings: views }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = RecordingsTemplate {
+        recordings: views,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
 pub async fn recording_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_recording(&pool, path.into_inner())
         .await
@@ -892,18 +956,25 @@ pub async fn recording_delete(
 // Handlers — Bands
 // ---------------------------------------------------------------------------
 
-pub async fn band_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn band_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let bands = queries::list_bands(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = BandsTemplate { bands }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = BandsTemplate {
+        bands,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn band_new() -> actix_web::Result<HttpResponse> {
+pub async fn band_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Result<HttpResponse> {
     let body = BandFormTemplate {
+        csrf_token: _csrf.0,
         name: String::new(),
     }
     .render()
@@ -929,6 +1000,7 @@ pub async fn band_create(
 pub async fn band_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_band(&pool, path.into_inner())
         .await
@@ -965,7 +1037,10 @@ fn song_to_file_views(files: &[SongFile]) -> Vec<FileView> {
         .collect()
 }
 
-pub async fn production_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn production_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let data = queries::list_all_production_stages(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1007,15 +1082,19 @@ pub async fn production_list(pool: web::Data<SqlitePool>) -> actix_web::Result<H
         });
     }
 
-    let body = ProductionTemplate { songs }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ProductionTemplate {
+        songs,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
 pub async fn stage_new(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
     let song = queries::get_song(&pool, song_id)
@@ -1024,6 +1103,7 @@ pub async fn stage_new(
         .ok_or_else(|| actix_web::error::ErrorNotFound("Song not found"))?;
 
     let body = StageFormTemplate {
+        csrf_token: _csrf.0,
         song_title: song.title,
     }
     .render()
@@ -1036,6 +1116,7 @@ pub async fn stage_create(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StageFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
@@ -1054,6 +1135,7 @@ pub async fn stage_update_status(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
     queries::update_production_stage_status(&pool, path.into_inner(), &status)
@@ -1065,6 +1147,7 @@ pub async fn stage_update_status(
 pub async fn stage_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_production_stage(&pool, path.into_inner())
         .await
@@ -1075,6 +1158,7 @@ pub async fn stage_delete(
 pub async fn step_new(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let stage_id = path.into_inner();
     let instruments = queries::list_instruments(&pool)
@@ -1092,6 +1176,7 @@ pub async fn step_new(
         .unwrap_or_default();
 
     let body = StepFormTemplate {
+        csrf_token: _csrf.0,
         stage_name,
         instruments,
     }
@@ -1105,6 +1190,7 @@ pub async fn step_create(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StepFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
@@ -1126,6 +1212,7 @@ pub async fn step_update_status(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
     queries::update_production_step_status(&pool, path.into_inner(), &status)
@@ -1138,6 +1225,7 @@ pub async fn song_file_new(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     query: web::Query<std::collections::HashMap<String, String>>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
     let return_to = query.get("return_to").cloned().unwrap_or_default();
@@ -1150,6 +1238,7 @@ pub async fn song_file_new(
         .map_err(actix_web::error::ErrorInternalServerError)?;
 
     let body = SongFileFormTemplate {
+        csrf_token: _csrf.0,
         song_title: song.title,
         instruments,
         return_to,
@@ -1163,6 +1252,7 @@ pub async fn song_file_create(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<SongFileFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let input = CreateSongFile {
@@ -1188,6 +1278,7 @@ pub async fn song_file_create(
 pub async fn song_file_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_song_file(&pool, path.into_inner())
         .await
@@ -1202,6 +1293,7 @@ pub async fn song_file_delete(
 pub async fn auto_add_stages(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::auto_add_stages(&pool, path.into_inner())
         .await
@@ -1212,6 +1304,7 @@ pub async fn auto_add_stages(
 pub async fn auto_add_steps(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let stage_id = path.into_inner();
     // Determine if the song is a cover to pick the right composition steps
@@ -1236,7 +1329,10 @@ pub async fn auto_add_steps(
 // Handlers — Practice
 // ---------------------------------------------------------------------------
 
-pub async fn practice_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn practice_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let all_songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1285,9 +1381,12 @@ pub async fn practice_list(pool: web::Data<SqlitePool>) -> actix_web::Result<Htt
         });
     }
 
-    let body = PracticeTemplate { songs }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = PracticeTemplate {
+        songs,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
@@ -1321,9 +1420,13 @@ struct KanbanSong {
 struct KanbanTemplate {
     columns: Vec<KanbanColumn>,
     all_states: Vec<(String, String)>,
+    csrf_token: String,
 }
 
-pub async fn kanban_board(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn kanban_board(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let mut columns = Vec::new();
     for state in WorkflowState::all() {
         let songs = queries::list_songs_by_workflow_state(&pool, state)
@@ -1358,6 +1461,7 @@ pub async fn kanban_board(pool: web::Data<SqlitePool>) -> actix_web::Result<Http
     let body = KanbanTemplate {
         columns,
         all_states,
+        csrf_token: _csrf.0,
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1373,6 +1477,7 @@ pub async fn workflow_update(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<WorkflowUpdateForm>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
     let state = WorkflowState::parse(&form.0.workflow_state)
@@ -1390,6 +1495,7 @@ pub async fn workflow_update_json(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     body: web::Json<WorkflowUpdateForm>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
     let state = WorkflowState::parse(&body.workflow_state)
@@ -1408,11 +1514,14 @@ pub async fn workflow_update_json(
 #[template(path = "exercises.html")]
 struct ExercisesTemplate {
     exercises: Vec<PracticeExercise>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "exercise_form.html")]
-struct ExerciseFormTemplate {}
+struct ExerciseFormTemplate {
+    csrf_token: String,
+}
 
 #[derive(Deserialize)]
 pub struct ExerciseFormData {
@@ -1422,20 +1531,31 @@ pub struct ExerciseFormData {
     source: String,
 }
 
-pub async fn exercise_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn exercise_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let exercises = queries::list_exercises(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = ExercisesTemplate { exercises }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ExercisesTemplate {
+        exercises,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn exercise_new(_pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
-    let body = ExerciseFormTemplate {}
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+pub async fn exercise_new(
+    _pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
+    let body = ExerciseFormTemplate {
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
@@ -1478,6 +1598,7 @@ pub async fn exercise_create(
 pub async fn exercise_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_exercise(&pool, path.into_inner())
         .await
@@ -1495,11 +1616,14 @@ pub async fn exercise_delete(
 #[template(path = "goals.html")]
 struct GoalsTemplate {
     goals: Vec<Goal>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "goal_form.html")]
-struct GoalFormTemplate {}
+struct GoalFormTemplate {
+    csrf_token: String,
+}
 
 #[derive(Deserialize)]
 pub struct GoalFormData {
@@ -1511,20 +1635,28 @@ pub struct GoalFormData {
     sort_order: i32,
 }
 
-pub async fn goal_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn goal_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let goals = queries::list_goals(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = GoalsTemplate { goals }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = GoalsTemplate {
+        goals,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn goal_new() -> actix_web::Result<HttpResponse> {
-    let body = GoalFormTemplate {}
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+pub async fn goal_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Result<HttpResponse> {
+    let body = GoalFormTemplate {
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
@@ -1554,6 +1686,7 @@ pub async fn goal_create(
 pub async fn goal_toggle(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::toggle_goal(&pool, path.into_inner())
         .await
@@ -1566,6 +1699,7 @@ pub async fn goal_toggle(
 pub async fn goal_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_goal(&pool, path.into_inner())
         .await
@@ -1582,10 +1716,11 @@ pub async fn goal_delete(
 #[derive(Template)]
 #[template(path = "profile.html")]
 struct ProfileTemplate {
+    csrf_token: String,
     profile: UserProfile,
     journal_entries: Vec<JournalEntry>,
-    current_page: i32,
-    total_pages: i32,
+    current_page: u32,
+    total_pages: u32,
 }
 
 #[derive(Deserialize)]
@@ -1602,6 +1737,7 @@ pub struct ProfileFormData {
 pub async fn profile_view(
     pool: web::Data<SqlitePool>,
     query: web::Query<std::collections::HashMap<String, String>>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let page: i32 = query.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
     let per_page = 20;
@@ -1622,10 +1758,11 @@ pub async fn profile_view(
     let total_pages = ((total_count as f64) / (per_page as f64)).ceil() as i32;
 
     let body = ProfileTemplate {
+        csrf_token: _csrf.0,
         profile,
         journal_entries,
-        current_page: page,
-        total_pages,
+        current_page: page as u32,
+        total_pages: total_pages as u32,
     }
     .render()
     .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1635,6 +1772,7 @@ pub async fn profile_view(
 pub async fn profile_update(
     pool: web::Data<SqlitePool>,
     form: QsForm<ProfileFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
     queries::update_profile(
@@ -1669,6 +1807,7 @@ pub async fn journal_entry_update_notes(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<JournalNotesForm>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
     let mut notes = form.0.notes;
@@ -1684,6 +1823,7 @@ pub async fn journal_entry_update_notes(
 pub async fn journal_entry_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_journal_entry(&pool, path.into_inner())
         .await
@@ -1701,6 +1841,7 @@ pub async fn journal_entry_delete(
 #[template(path = "schedule.html")]
 struct ScheduleTemplate {
     events: Vec<ScheduleEvent>,
+    csrf_token: String,
 }
 
 #[derive(Deserialize)]
@@ -1709,19 +1850,26 @@ pub struct GenerateScheduleForm {
     num_blocks: i32,
 }
 
-pub async fn schedule_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn schedule_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let events = queries::list_schedule_events(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = ScheduleTemplate { events }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = ScheduleTemplate {
+        events,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
 pub async fn schedule_generate(
     pool: web::Data<SqlitePool>,
     form: QsForm<GenerateScheduleForm>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
     queries::generate_schedule(&pool, &f.start_date, f.num_blocks)
@@ -1735,6 +1883,7 @@ pub async fn schedule_generate(
 pub async fn schedule_item_toggle(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::toggle_schedule_item(&pool, path.into_inner())
         .await
@@ -1747,6 +1896,7 @@ pub async fn schedule_item_toggle(
 pub async fn schedule_event_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_schedule_event(&pool, path.into_inner())
         .await
@@ -1811,11 +1961,14 @@ pub async fn schedule_ics_export(pool: web::Data<SqlitePool>) -> actix_web::Resu
 struct SetsTemplate {
     sets: Vec<LiveSet>,
     songs: Vec<Song>,
+    csrf_token: String,
 }
 
 #[derive(Template)]
 #[template(path = "set_form.html")]
-struct SetFormTemplate {}
+struct SetFormTemplate {
+    csrf_token: String,
+}
 
 #[derive(Deserialize)]
 pub struct SetFormData {
@@ -1846,23 +1999,35 @@ pub struct PriorityFormData {
     priority: i32,
 }
 
-pub async fn set_list(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
+pub async fn set_list(
+    pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let sets = queries::list_live_sets(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     let songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let body = SetsTemplate { sets, songs }
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let body = SetsTemplate {
+        sets,
+        songs,
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
-pub async fn set_new(_pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
-    let body = SetFormTemplate {}
-        .render()
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+pub async fn set_new(
+    _pool: web::Data<SqlitePool>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
+    let body = SetFormTemplate {
+        csrf_token: _csrf.0,
+    }
+    .render()
+    .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
@@ -1892,6 +2057,7 @@ pub async fn set_create(
 pub async fn set_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::delete_live_set(&pool, path.into_inner())
         .await
@@ -1905,6 +2071,7 @@ pub async fn set_add_song(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<SetSongFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let input = CreateLiveSetSong {
@@ -1926,6 +2093,7 @@ pub async fn set_add_song(
 pub async fn set_remove_song(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     queries::remove_song_from_set(&pool, path.into_inner())
         .await
@@ -1939,6 +2107,7 @@ pub async fn practice_priority_update(
     pool: web::Data<SqlitePool>,
     path: web::Path<i64>,
     form: QsForm<PriorityFormData>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let priority = form.0.priority.clamp(0, 5);
     queries::update_practice_priority(&pool, path.into_inner(), priority)
@@ -1951,9 +2120,15 @@ pub async fn practice_priority_update(
 // Handlers — Job monitor
 // ---------------------------------------------------------------------------
 
-pub async fn jobs_list(store: web::Data<JobStore>) -> actix_web::Result<HttpResponse> {
+pub async fn jobs_list(
+    store: web::Data<JobStore>,
+    _csrf: actix_csrf_middleware::CsrfToken,
+) -> actix_web::Result<HttpResponse> {
     let jobs: Vec<JobRowView> = store.list().iter().map(job_to_row).collect();
-    let tmpl = JobsTemplate { jobs };
+    let tmpl = JobsTemplate {
+        jobs,
+        csrf_token: _csrf.0,
+    };
     let body = tmpl
         .render()
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1963,6 +2138,7 @@ pub async fn jobs_list(store: web::Data<JobStore>) -> actix_web::Result<HttpResp
 pub async fn job_detail(
     store: web::Data<JobStore>,
     path: web::Path<u64>,
+    _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
     let record = store
@@ -1978,6 +2154,7 @@ pub async fn job_detail(
         log_lines: record.log_lines.clone(),
         prefill_json,
         row: job_to_row(&record),
+        csrf_token: _csrf.0,
     };
     let body = tmpl
         .render()

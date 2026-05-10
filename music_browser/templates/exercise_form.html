@@ -6,6 +6,7 @@
 </div>
 
 <form method="post" action="/exercises/new" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-group">
         <label for="exercise_list">Exercise Names (one per line) *</label>
         <textarea id="exercise_list" name="exercise_list" rows="8" placeholder="Chromatic warmup&#10;Major scales&#10;Minor pentatonic patterns&#10;..." required></textarea>

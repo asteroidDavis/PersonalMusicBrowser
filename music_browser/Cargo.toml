@@ -46,3 +46,5 @@ actix-test = "0.1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
+serde_yaml = "0.9"
+urlencoding = "2"

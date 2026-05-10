@@ -78,9 +78,10 @@
             <tr>
                 <td class="stage-name">{{ stage.name }}</td>
                 <td class="status-cell">
-                    <form method="post" action="/production/stages/{{ stage.id }}/status" class="inline-form">
-                        <select name="status" onchange="this.form.submit()" class="status-select">
-                            <option value="not_started" {% if stage.status_str == "not_started" %}selected{% endif %}>∅ Not Started</option>
+                    <form method="post" action="/production/stages/{{ stage.id }}/status" style="display:inline;margin:0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <select onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
+                            <option value="not_started" {% if stage.status_str == "not_started" %}selected{% endif %}>⬜ Not Started</option>
                             <option value="skipped" {% if stage.status_str == "skipped" %}selected{% endif %}>🚫 Skipped</option>
                             <option value="in_progress" {% if stage.status_str == "in_progress" %}selected{% endif %}>🔄 In Progress</option>
                             <option value="nearing_completion" {% if stage.status_str == "nearing_completion" %}selected{% endif %}>🏁 Nearing</option>
@@ -93,13 +94,11 @@
                 <td class="steps-cell">
                     {% for step in stage.steps %}
                         <span class="step-chip" title="{{ step.name }}{% if !step.instrument_name.is_empty() %} ({{ step.instrument_name }}){% endif %}{% if !step.notes.is_empty() %} — {{ step.notes }}{% endif %}">
-                            <form method="post" action="/production/steps/{{ step.id }}/status" class="inline-form">
-                                <select name="status" onchange="this.form.submit()" class="step-select" title="{{ step.name }}">
-                                    <option value="not_started" {% if step.status_str == "not_started" %}selected{% endif %}>∅</option>
-                                    <option value="skipped" {% if step.status_str == "skipped" %}selected{% endif %}>🚫</option>
+                            <form method="post" action="/production/steps/{{ step.id }}/status" style="display:inline;margin:0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <select onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
+                                    <option value="todo" {% if step.status_str == "todo" %}selected{% endif %}>⬜</option>
                                     <option value="in_progress" {% if step.status_str == "in_progress" %}selected{% endif %}>🔄</option>
-                                    <option value="nearing_completion" {% if step.status_str == "nearing_completion" %}selected{% endif %}>🏁</option>
-                                    <option value="borked" {% if step.status_str == "borked" %}selected{% endif %}>❤️‍🩹</option>
                                     <option value="complete" {% if step.status_str == "complete" %}selected{% endif %}>✅</option>
                                     <option value="exceptional" {% if step.status_str == "exceptional" %}selected{% endif %}>📈</option>
                                 </select>
@@ -110,12 +109,14 @@
                     <a href="/production/stages/{{ stage.id }}/steps/new" class="btn btn-sm" style="font-size:.7rem;padding:.15rem .4rem">+ Step</a>
                     {% if stage.steps.is_empty() %}
                     <form method="post" action="/production/stages/{{ stage.id }}/steps/auto" style="display:inline;margin:0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-sm" style="font-size:.7rem;padding:.15rem .4rem" title="Add default steps for this stage">⚡ Auto</button>
                     </form>
                     {% endif %}
                 </td>
                 <td class="actions">
                     <form method="post" action="/production/stages/{{ stage.id }}/delete">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button class="btn btn-danger btn-sm">✕</button>
                     </form>
                 </td>
@@ -141,6 +142,7 @@
                 {% if !f.instrument_name.is_empty() %}<span class="text-muted">({{ f.instrument_name }})</span>{% endif %}
                 {% if !f.description.is_empty() %}<span class="text-muted"> — {{ f.description }}</span>{% endif %}
                 <form method="post" action="/production/files/{{ f.id }}/delete" class="inline-form" style="margin-left:auto;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button class="btn btn-danger btn-sm" style="font-size:.65rem;padding:.1rem .3rem">✕</button>
                 </form>
             </li>

@@ -44,10 +44,13 @@ const DEFAULT_HYDRATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_HYDRATION_COPY_MAX_BYTES: Option<u64> = Some(1_024 * 1_024 * 1_024);
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct JobConfig {
     job_store_cap: usize,
     job_store_ttl: Duration,
+    #[allow(dead_code)]
     hydration_timeout: Duration,
+    #[allow(dead_code)]
     hydration_copy_max_bytes: Option<u64>,
 }
 
@@ -154,6 +157,7 @@ pub struct JobQueue {
 impl JobQueue {
     /// Create a new queue.  Returns the `JobQueue` handle and the receiving
     /// end that the background worker task should own.
+    #[allow(dead_code)]
     pub fn new(buffer: usize) -> (Self, mpsc::Receiver<WorkflowJob>) {
         let (sender, receiver) = mpsc::channel(buffer);
         let queue = JobQueue {
@@ -191,16 +195,21 @@ pub enum EnqueueError {
 // ============================================================================
 
 /// Lifecycle state of a job.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum JobStatus {
     Queued,
+    #[allow(dead_code)]
     Running,
+    #[allow(dead_code)]
     Done,
+    #[allow(dead_code)]
     Failed,
 }
 
 impl JobStatus {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             JobStatus::Queued => "queued",
@@ -253,23 +262,27 @@ impl JobStore {
     }
 
     /// Transition a job to `Running`.
+    #[allow(dead_code)]
     pub fn mark_running(&self, id: u64) {
-        self.update(id, |r| r.status = JobStatus::Running);
+        self.update(id, |rec| rec.status = JobStatus::Running);
     }
 
     /// Append a log line to a job's record.
+    #[allow(dead_code)]
     pub fn append_log(&self, id: u64, line: String) {
-        self.update(id, |r| r.log_lines.push(line));
+        self.update(id, |rec| rec.log_lines.push(line));
     }
 
     /// Transition a job to `Done`.
+    #[allow(dead_code)]
     pub fn mark_done(&self, id: u64) {
-        self.update(id, |r| r.status = JobStatus::Done);
+        self.update(id, |rec| rec.status = JobStatus::Done);
     }
 
     /// Transition a job to `Failed`.
+    #[allow(dead_code)]
     pub fn mark_failed(&self, id: u64) {
-        self.update(id, |r| r.status = JobStatus::Failed);
+        self.update(id, |rec| rec.status = JobStatus::Failed);
     }
 
     /// Return a snapshot of all live records, newest first.
@@ -282,19 +295,20 @@ impl JobStore {
     /// Return a single record by job ID.
     pub fn get(&self, id: u64) -> Option<JobRecord> {
         let guard = self.0.lock().unwrap();
-        guard.iter().find(|r| r.job.id == id).cloned()
+        guard.iter().find(|rec| rec.job.id == id).cloned()
     }
 
+    #[allow(dead_code)]
     fn update<F: FnOnce(&mut JobRecord)>(&self, id: u64, f: F) {
         let mut guard = self.0.lock().unwrap();
-        if let Some(r) = guard.iter_mut().find(|r| r.job.id == id) {
-            f(r);
+        if let Some(rec) = guard.iter_mut().find(|rec| rec.job.id == id) {
+            f(rec);
         }
     }
 
     fn evict(&self, guard: &mut VecDeque<JobRecord>) {
         let now = std::time::Instant::now();
-        guard.retain(|r| now.duration_since(r.created_at) < config().job_store_ttl);
+        guard.retain(|rec| now.duration_since(rec.created_at) < config().job_store_ttl);
     }
 }
 
@@ -313,16 +327,15 @@ impl Default for JobStore {
 /// Defaults to `music-operations` (picked up from `$PATH`).  Useful when the
 /// CLI is installed in a venv that is not on `$PATH`, e.g.
 /// `MUSIC_OPERATIONS_BIN=/opt/music-ops/bin/music-operations`.
+#[allow(dead_code)]
 pub const MUSIC_OPERATIONS_BIN_ENV: &str = "MUSIC_OPERATIONS_BIN";
 
-/// Resolve the `music-operations` executable name.
+#[allow(dead_code)]
 fn music_operations_bin() -> String {
     std::env::var(MUSIC_OPERATIONS_BIN_ENV).unwrap_or_else(|_| "music-operations".to_string())
 }
 
-/// Map a [`Operation`] to the sub-command expected by the `music-operations`
-/// CLI (`--operation <X>`).  Returns `None` for operations that the external
-/// CLI does not yet support so the caller can surface a clear error.
+#[allow(dead_code)]
 fn operation_cli_name(op: &Operation) -> Option<&'static str> {
     match op {
         Operation::GenerateSheetMusic => Some("anthemscore"),
@@ -335,6 +348,7 @@ fn operation_cli_name(op: &Operation) -> Option<&'static str> {
 /// the corresponding `music-operations` Python CLI once per input.
 ///
 /// All progress is written into `store` so the `/jobs` UI can display it.
+#[allow(dead_code)]
 pub async fn run_worker(mut receiver: mpsc::Receiver<WorkflowJob>, store: JobStore) {
     log::info!("workflow job worker started");
     while let Some(job) = receiver.recv().await {
@@ -351,6 +365,7 @@ macro_rules! job_log {
     }};
 }
 
+#[allow(dead_code)]
 async fn process_job(store: &JobStore, job: WorkflowJob) {
     let id = job.id;
     store.mark_running(id);
@@ -458,6 +473,7 @@ async fn process_job(store: &JobStore, job: WorkflowJob) {
     store.mark_done(id);
 }
 
+#[allow(dead_code)]
 /// Decide the `--output-dir` passed to the subprocess for `input`.
 ///
 /// Uses the job's explicit `output_dir` when present; otherwise falls back to
@@ -475,6 +491,7 @@ fn resolve_output_dir(job: &WorkflowJob, input: &Path) -> Result<PathBuf, String
 
 /// Run one `music-operations` invocation, tailing stdout/stderr into the
 /// job's log.  Returns the subprocess exit code.
+#[allow(dead_code)]
 async fn spawn_music_operations(
     id: u64,
     store: &JobStore,
@@ -539,6 +556,7 @@ async fn spawn_music_operations(
 /// Result of a hydration check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum HydrationStatus {
     /// File exists and its full contents are present on disk.
     Hydrated,
@@ -549,6 +567,7 @@ pub enum HydrationStatus {
     NotFound,
 }
 
+#[allow(dead_code)]
 /// Check whether a file at `path` is physically present (fully hydrated) on
 /// the local filesystem.
 ///
@@ -618,12 +637,14 @@ pub fn check_hydration(path: &Path) -> HydrationStatus {
 
 /// Guard that keeps a hydrated file path alive along with any tempdir backing it.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct LocalPathGuard {
     path: PathBuf,
     _temp_dir: Option<tempfile::TempDir>,
 }
 
 impl LocalPathGuard {
+    #[allow(dead_code)]
     fn owned(path: PathBuf) -> Self {
         Self {
             path,
@@ -631,6 +652,7 @@ impl LocalPathGuard {
         }
     }
 
+    #[allow(dead_code)]
     fn with_tempdir(path: PathBuf, temp_dir: tempfile::TempDir) -> Self {
         Self {
             path,
@@ -638,6 +660,7 @@ impl LocalPathGuard {
         }
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -645,6 +668,7 @@ impl LocalPathGuard {
 
 /// Errors produced by [`ensure_local`].
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum HydrationError {
     /// The path does not exist at all on the filesystem.
     #[error("path not found: {0}")]
@@ -685,6 +709,7 @@ pub enum HydrationError {
 ///
 /// The returned guard keeps any fallback `TempDir` alive for the lifetime of
 /// the job, avoiding intentional leaks.
+#[allow(dead_code)]
 pub async fn ensure_local(path: &Path) -> Result<LocalPathGuard, HydrationError> {
     match check_hydration(path) {
         HydrationStatus::Hydrated => return Ok(LocalPathGuard::owned(path.to_path_buf())),
@@ -720,6 +745,7 @@ pub async fn ensure_local(path: &Path) -> Result<LocalPathGuard, HydrationError>
 /// Invoke the platform-native command that requests a cloud file to be
 /// downloaded.  This is best-effort: failures are logged but not returned as
 /// errors (the caller polls `check_hydration` independently).
+#[allow(dead_code)]
 async fn trigger_hydration(path: &Path) {
     #[cfg(target_os = "windows")]
     {
@@ -761,6 +787,7 @@ async fn trigger_hydration(path: &Path) {
 
 /// Copy `src` into a newly-created temporary directory and return a guard that
 /// keeps that directory alive for the caller's lifetime.
+#[allow(dead_code)]
 async fn copy_to_temp(
     path: &Path,
     max_bytes: Option<u64>,

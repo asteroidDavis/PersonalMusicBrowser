@@ -237,6 +237,7 @@ impl ResponseError for AuthRedirectError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct AuthRedirectClearCookieError;
 
 impl std::fmt::Display for AuthRedirectClearCookieError {
@@ -584,7 +585,7 @@ pub async fn login_submit(
         .body(html))
 }
 
-pub async fn logout() -> actix_web::Result<HttpResponse> {
+pub async fn logout(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Result<HttpResponse> {
     let mut cookie = actix_web::cookie::Cookie::named("auth_token");
     cookie.make_removal();
     cookie.set_path("/");

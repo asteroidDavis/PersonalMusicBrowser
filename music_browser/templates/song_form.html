@@ -5,6 +5,7 @@
     <h2>{% if editing %}✏️ Edit Song{% else %}🎵 Add Song{% endif %}</h2>
 </div>
 <form class="form" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="return_to" value="{{ return_to }}">
     <div class="form-group">
         <label for="title">Title</label>

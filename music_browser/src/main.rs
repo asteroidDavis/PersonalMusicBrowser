@@ -3,8 +3,12 @@ use actix_web::{middleware, web, App, HttpServer};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
-use music_browser::app;
-use music_browser::auth::{self, AuthConfig};
+
+mod app;
+mod auth;
+mod db;
+mod jobs;
+
 use music_browser::db::pool;
 use music_browser::jobs::{run_worker, JobQueue};
 
@@ -22,7 +26,7 @@ async fn main() -> std::io::Result<()> {
 
     let pool_data = web::Data::new(pool);
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
-    let auth_config = AuthConfig::from_env();
+    let auth_config = auth::AuthConfig::from_env();
     let auth_data = web::Data::new(auth_config.clone());
 
     // CSRF middleware configuration
@@ -49,6 +53,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
+        .with_skip_for(vec!["/jobs".to_string(), "/workflow".to_string()])
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
             secure: cookie_secure,
@@ -78,11 +83,11 @@ async fn main() -> std::io::Result<()> {
             .app_data(auth_data.clone())
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
-            .wrap(CsrfMiddleware::new(csrf_config.clone()))
             .wrap(middleware::Condition::new(
                 request_auth,
-                auth::JwtMiddleware::new(auth_data.get_ref().clone()),
+                auth::JwtMiddleware::new(auth_config.clone()),
             ))
+            .wrap(CsrfMiddleware::new(csrf_config.clone()))
             .configure(app::configure_app)
     });
 

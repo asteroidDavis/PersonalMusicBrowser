@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 use std::str::FromStr;
 
 /// Initialize the SQLite connection pool and run migrations.
+#[allow(dead_code)]
 pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(database_url)?
         .create_if_missing(true)
@@ -20,6 +21,7 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
 }
 
 /// Run SQL migrations from the migrations directory.
+#[allow(dead_code)]
 async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::migrate!("./migrations")
         .run(pool)

@@ -5,6 +5,7 @@
     <h2>💿 Add Album</h2>
 </div>
 <form class="form-card" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-group">
         <label for="title">Title</label>
         <input type="text" id="title" name="title" required value="{{ title }}">

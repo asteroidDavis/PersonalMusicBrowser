@@ -124,6 +124,10 @@ cargo run --bin music-browser
 | `AUTH_PUBLIC_PATHS` | `/login,/signup,/logout` | Comma-separated list of public paths that bypass JWT middleware |
 | `POCKETBASE_CA_CERT` | (optional) | Path to custom CA certificate for PocketBase TLS (for self-signed certs) |
 | `CSRF_SECRET` | (required) | Secret key for CSRF token validation (32+ bytes recommended) |
+| `CSRF_COOKIE_SECURE` | `false` | Whether CSRF cookies use the Secure flag (auto-set based on HTTPS_ENABLED) |
+| `HTTPS_ENABLED` | `false` | Whether to enable HTTPS (requires SSL_CERT_PATH and SSL_KEY_PATH) |
+| `SSL_CERT_PATH` | `./certs/server.crt` | Path to SSL certificate file |
+| `SSL_KEY_PATH` | `./certs/server.key` | Path to SSL private key file |
 
 ## Database
 
@@ -166,6 +170,105 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 cp ./music_browser.db ${BACKUP_DEST}/music_browser_${LATEST_MIGRATION}_${TIMESTAMP}.db 
 sqlx migrate run --source ./migrations --database-url sqlite:music_browser.db
 ```
+
+## Security
+
+### Authentication
+
+The application uses JWT (JSON Web Tokens) for authentication with PocketBase as the authentication backend.
+
+**How it works:**
+
+1. **Login Flow:**
+   - User submits credentials to `/login` (POST)
+   - Application authenticates with PocketBase via `/api/collections/users/records/auth-with-password`
+   - PocketBase returns a JWT token
+   - Application sets an `auth_token` cookie (HttpOnly, SameSite=Lax)
+   - User is redirected to the homepage
+
+2. **JWT Middleware:**
+   - When `AUTH_REQUIRE_LOGIN=true`, all routes except those in `AUTH_PUBLIC_PATHS` require valid JWT tokens
+   - Middleware validates the JWT signature using `POCKETBASE_JWT_SECRET` (HS256 algorithm)
+   - Tokens are extracted from the `auth_token` cookie
+   - Invalid/expired tokens result in a redirect to `/login` with an error page
+
+3. **Signup Flow:**
+   - User submits email/password to `/signup` (POST)
+   - Application validates server-side (email format, password requirements)
+   - Creates user record in PocketBase via `/api/collections/users/records`
+   - On success, redirects to login page
+
+4. **Logout:**
+   - POST to `/logout` removes the `auth_token` and `auth_present` cookies
+   - Redirects to login page
+
+**Environment Variables:**
+
+- `POCKETBASE_URL`: PocketBase instance URL (default: `https://127.0.0.1:8090`)
+- `POCKETBASE_JWT_SECRET`: Secret used to sign JWT tokens (required for production)
+- `AUTH_ALLOW_EMPTY_JWT_SECRET`: Set to `true` to allow empty JWT secret (development only, insecure)
+- `AUTH_COOKIE_SECURE`: Whether auth cookies use the Secure flag (default: `false` for HTTP local dev)
+- `AUTH_REQUIRE_LOGIN`: Whether JWT middleware is active (default: `false`)
+- `AUTH_PUBLIC_PATHS`: Comma-separated paths that bypass JWT middleware (default: `/login,/signup,/logout`)
+- `POCKETBASE_CA_CERT`: Path to custom CA certificate for PocketBase TLS (for self-signed certs)
+
+**Security Notes:**
+
+- JWT secrets must be 32+ bytes for production use
+- Empty JWT secrets are rejected unless `AUTH_ALLOW_EMPTY_JWT_SECRET=true` (development only)
+- Auth cookies are HttpOnly to prevent XSS attacks
+- SameSite=Lax prevents CSRF on most attacks while allowing navigation
+- Set `AUTH_COOKIE_SECURE=true` when using HTTPS
+
+### CSRF Protection
+
+The application uses the double-submit cookie pattern for CSRF (Cross-Site Request Forgery) protection via `actix-csrf-middleware`.
+
+**How it works:**
+
+1. **Token Generation:**
+   - On GET requests, the middleware generates a cryptographically secure CSRF token
+   - Token is stored in a cookie (`CSRF-ANON` for anonymous users, `CSRF-AUTH` for authenticated users)
+   - Token is also injected into template context as `csrf_token`
+   - Templates render the token in hidden form fields: `<input type="hidden" name="csrf_token" value="{{ csrf_token }}">`
+
+2. **Token Validation:**
+   - On POST/PUT/DELETE requests, middleware checks both:
+     - The CSRF cookie value
+     - The `csrf_token` form field value
+   - If both match and are valid, request proceeds
+   - If missing or mismatched, request is rejected with 403 Forbidden
+
+3. **JavaScript Requests:**
+   - For AJAX/fetch requests, the CSRF token must be included in the request body
+   - Example: `formData.append('csrf_token', '{{ csrf_token }}');`
+   - The CSRF cookie is automatically sent by the browser
+
+4. **Skipped Endpoints:**
+   - `/jobs` and `/workflow` endpoints skip CSRF middleware (configured in `main.rs`)
+   - These are typically API endpoints that may be called from external tools
+
+**Environment Variables:**
+
+- `CSRF_SECRET`: Secret key for CSRF token signing (required, 32+ bytes recommended)
+- `CSRF_COOKIE_SECURE`: Whether CSRF cookies use the Secure flag (auto-set based on `HTTPS_ENABLED`)
+- `HTTPS_ENABLED`: Whether to enable HTTPS (requires SSL certificates)
+
+**Security Notes:**
+
+- CSRF_SECRET must be cryptographically random and 32+ bytes
+- Generate with: `openssl rand -base64 32`
+- Using the default secret triggers a security warning at startup
+- Secure flag is automatically enabled when using HTTPS
+- SameSite=Lax for HTTP, SameSite=Strict for HTTPS
+
+**Implementation Details:**
+
+- All form handlers accept `actix_csrf_middleware::CsrfToken` parameter
+- Token is extracted via `csrf.0` and passed to templates
+- Unused CSRF parameters are prefixed with `_csrf` to satisfy clippy
+- All POST forms include hidden CSRF token input
+- JavaScript form submissions include CSRF token in request body
 
 ## Bulk Import
 
