@@ -25,6 +25,7 @@
                 <td class="actions">
                     <form method="post" action="/albums/{{ a.id }}/delete" style="display:inline"
                           onsubmit="return confirm('Delete this album?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Music Browser{% endblock %}
+
+{% block content %}
+{% if is_insecure %}
+<div style="background:#dc2626;color:white;padding:1rem;margin-bottom:1.5rem;border-radius:8px;text-align:center;font-weight:600;border:2px solid #b91c1c;">
+    ⚠️ SECURITY WARNING: This application is running in an insecure configuration. Re-enable proper authentication before deploying to production.
+</div>
+{% endif %}
+
+<div class="page-header">
+    <h2>Login</h2>
+</div>
+
+<div class="form">
+        
+        {% if let Some(err) = error_message %}
+        <div class="error">
+            {{ err }}
+        </div>
+        {% endif %}
+        
+        <form action="/login" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="form-group">
+                <label for="identity">Email or Username</label>
+                <input type="text" name="identity" id="identity" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" name="password" id="password" required>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    Sign In
+                </button>
+                <a href="/signup" class="btn">Create an account</a>
+            </div>
+        </form>
+</div>
+{% endblock %}

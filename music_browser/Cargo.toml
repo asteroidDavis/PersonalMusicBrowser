@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = { version = "4", features = ["macros"] }
+actix-web = { version = "4", features = ["macros", "openssl"] }
 actix-files = "0.6"
 askama = { version = "0.12", features = ["with-actix-web"] }
 askama_actix = "0.14"
@@ -23,6 +23,14 @@ tempfile = "3"
 actix-multipart = "0.7.2"
 uuid = { version = "1.23.1", features = ["v4"] }
 chrono = "0.4"
+reqwest = { version = "0.13.3", features = ["json"] }
+cookie = "0.18.1"
+actix-web-httpauth = "0.8.2"
+async-trait = "0.1.89"
+futures-util = "0.3.32"
+url = "2"
+actix-csrf-middleware = "0.5.4"
+openssl = { version = "0.10", features = ["v110"] }
 
 [[bin]]
 name = "music-browser"
@@ -38,3 +46,5 @@ actix-test = "0.1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
+serde_yaml = "0.9"
+urlencoding = "2"

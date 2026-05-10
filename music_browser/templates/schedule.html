@@ -59,6 +59,7 @@
         </div>
         <form method="post" action="/schedule/events/{{ event.id }}/delete" style="display:inline;"
               onsubmit="return confirm('Delete this event and all its items?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-sm btn-danger">🗑</button>
         </form>
     </div>
@@ -66,6 +67,7 @@
     {% for item in event.items %}
         <div class="schedule-item {% if item.completed %}item-completed{% endif %} item-type-{{ item.item_type }}">
             <form method="post" action="/schedule/items/{{ item.id }}/toggle" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn-check" title="Toggle">
                     {% if item.completed %}✅{% else %}⬜{% endif %}
                 </button>

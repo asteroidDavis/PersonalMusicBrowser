@@ -5,6 +5,7 @@
     <h2>🎤 Add Artist</h2>
 </div>
 <form class="form-card" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-group">
         <label for="name">Name</label>
         <input type="text" id="name" name="name" required value="{{ name }}">

@@ -1,0 +1,293 @@
+# Endpoint configuration for automated testing
+# This file defines all endpoints to test, grouped by category
+
+get_endpoints:
+  - path: "/"
+    name: "songs_list"
+    public: true
+    description: "Main songs list page"
+  - path: "/albums"
+    name: "albums_list"
+    requires_auth: true
+    description: "Albums list page"
+  - path: "/artists"
+    name: "artists_list"
+    requires_auth: true
+    description: "Artists list page"
+  - path: "/instruments"
+    name: "instruments_list"
+    requires_auth: true
+    description: "Instruments list page"
+  - path: "/recordings"
+    name: "recordings_list"
+    requires_auth: true
+    description: "Recordings list page"
+  - path: "/bands"
+    name: "bands_list"
+    requires_auth: true
+    description: "Bands list page"
+  - path: "/production"
+    name: "production_list"
+    requires_auth: true
+    description: "Production workflow page"
+  - path: "/practice"
+    name: "practice_list"
+    requires_auth: true
+    description: "Practice page"
+  - path: "/workflow"
+    name: "kanban_board"
+    requires_auth: true
+    description: "Kanban workflow board"
+  - path: "/exercises"
+    name: "exercise_list"
+    requires_auth: true
+    description: "Exercises list page"
+  - path: "/goals"
+    name: "goal_list"
+    requires_auth: true
+    description: "Goals list page"
+  - path: "/profile"
+    name: "profile_view"
+    requires_auth: true
+    description: "User profile page"
+  - path: "/schedule"
+    name: "schedule_list"
+    requires_auth: true
+    description: "Schedule page"
+  - path: "/sets"
+    name: "set_list"
+    requires_auth: true
+    description: "Live sets list page"
+  - path: "/login"
+    name: "login_view"
+    public: true
+    description: "Login page"
+  - path: "/signup"
+    name: "signup_view"
+    public: true
+    description: "Signup page"
+
+form_groups:
+  - name: "auth"
+    description: "Authentication forms"
+    endpoints:
+      - path: "/login"
+        method: "POST"
+        public: true
+        requires_csrf: true
+      - path: "/signup"
+        method: "POST"
+        public: true
+        requires_csrf: true
+      - path: "/logout"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "songs"
+    description: "Song management forms"
+    endpoints:
+      - path: "/songs/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/songs/{id}/edit"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/songs/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "albums"
+    description: "Album management forms"
+    endpoints:
+      - path: "/albums/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/albums/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "artists"
+    description: "Artist management forms"
+    endpoints:
+      - path: "/artists/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/artists/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "instruments"
+    description: "Instrument management forms"
+    endpoints:
+      - path: "/instruments/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/instruments/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "bands"
+    description: "Band management forms"
+    endpoints:
+      - path: "/bands/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/bands/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "exercises"
+    description: "Exercise management forms"
+    endpoints:
+      - path: "/exercises/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/exercises/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "goals"
+    description: "Goal management forms"
+    endpoints:
+      - path: "/goals/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/goals/{id}/toggle"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/goals/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "profile"
+    description: "Profile management forms"
+    endpoints:
+      - path: "/profile"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "sets"
+    description: "Live set management forms"
+    endpoints:
+      - path: "/sets/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/sets/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/sets/{id}/songs"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/sets/songs/{id}/remove"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+
+button_endpoints:
+  - name: "production"
+    description: "Production workflow buttons"
+    endpoints:
+      - path: "/production/songs/{id}/stages/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/stages/{id}/status"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/stages/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/stages/{id}/steps/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/steps/{id}/status"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/songs/{id}/files/new"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/files/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/songs/{id}/stages/auto"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/production/stages/{id}/steps/auto"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+  - name: "workflow"
+    description: "Workflow state buttons"
+    endpoints:
+      - path: "/workflow/songs/{id}/state"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+      - path: "/api/workflow/songs/{id}/state"
+        method: "PUT"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+  - name: "schedule"
+    description: "Schedule management buttons"
+    endpoints:
+      - path: "/schedule/generate"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/schedule/items/{id}/toggle"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/schedule/events/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+  - name: "practice"
+    description: "Practice priority buttons"
+    endpoints:
+      - path: "/practice/songs/{id}/priority"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+        requires_song: true
+  - name: "journal"
+    description: "Journal management buttons"
+    endpoints:
+      - path: "/journal/{id}/notes"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true
+      - path: "/journal/{id}/delete"
+        method: "POST"
+        requires_auth: true
+        requires_csrf: true

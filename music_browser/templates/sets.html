@@ -19,6 +19,7 @@
             <span class="text-muted" style="font-size:.8em">({{ set.set_type }})</span>
         </h3>
         <form method="post" action="/sets/{{ set.id }}/delete" style="margin:0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this set?')">🗑</button>
         </form>
     </div>

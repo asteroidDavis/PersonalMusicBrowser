@@ -6,6 +6,7 @@
 </div>
 
 <form method="post" action="/sets/new" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>
         Name
         <input type="text" name="name" required maxlength="256" placeholder="Friday Night Set">

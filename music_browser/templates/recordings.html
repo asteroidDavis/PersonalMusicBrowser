@@ -21,6 +21,7 @@
                 <td class="actions">
                     <form method="post" action="/recordings/{{ r.id }}/delete" style="display:inline"
                           onsubmit="return confirm('Delete this recording?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-sm btn-danger">🗑</button>
                     </form>
                 </td>

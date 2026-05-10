@@ -5,6 +5,7 @@
     <h2>📋 Add Step to "{{ stage_name }}"</h2>
 </div>
 <form class="form" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-group">
         <label for="name">Step Name</label>
         <input type="text" id="name" name="name" required placeholder="e.g. trackDemo, automatedNoteDetection, sight read">
