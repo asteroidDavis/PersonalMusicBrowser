@@ -169,6 +169,69 @@ async fn test_jobs_endpoint_with_jobstore() {
 }
 
 #[actix_web::test]
+async fn test_job_detail_endpoint_with_full_production_config() {
+    let (job_queue, _job_receiver) = JobQueue::new(256);
+    let job_store = job_queue.store.clone();
+    let queue_data = web::Data::new(job_queue);
+    let store_data = web::Data::new(job_store);
+
+    let auth_config = music_browser::auth::AuthConfig::from_env();
+    let auth_data = web::Data::new(auth_config.clone());
+
+    let csrf_config =
+        CsrfMiddlewareConfig::double_submit_cookie(b"test-secret-32-bytes-long-for-testing-!!")
+            .with_skip_for(vec!["/workflow".to_string()]);
+
+    let pool_data = web::Data::new(pool::init_pool("sqlite::memory:").await.unwrap());
+
+    let app = test::init_service(
+        App::new()
+            .app_data(pool_data.clone())
+            .app_data(auth_data.clone())
+            .app_data(store_data.clone())
+            .app_data(queue_data.clone())
+            .wrap(CsrfMiddleware::new(csrf_config))
+            .configure(app::configure_app),
+    )
+    .await;
+
+    // First, get the login page to establish CSRF session
+    let login_req = test::TestRequest::get().uri("/login").to_request();
+    let login_resp = test::call_service(&app, login_req).await;
+
+    // Extract CSRF cookie
+    let csrf_cookie_name = login_resp
+        .response()
+        .cookies()
+        .find(|cookie| cookie.name() == "CSRF-ANON")
+        .map(|cookie| cookie.name().to_string())
+        .expect("CSRF cookie not found");
+    let csrf_cookie_value = login_resp
+        .response()
+        .cookies()
+        .find(|cookie| cookie.name() == "CSRF-ANON")
+        .map(|cookie| cookie.value().to_string())
+        .expect("CSRF cookie value not found");
+
+    let mut csrf_cookie = actix_web::cookie::Cookie::new(csrf_cookie_name, csrf_cookie_value);
+    csrf_cookie.set_same_site(actix_web::cookie::SameSite::Lax);
+    csrf_cookie.set_http_only(false);
+
+    // Test job detail endpoint with a non-existent job ID (should return 404)
+    let req = test::TestRequest::get()
+        .uri("/jobs/999")
+        .cookie(csrf_cookie)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    println!(
+        "Job detail (non-existent) - Response status: {}",
+        resp.status()
+    );
+    assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+}
+
+#[actix_web::test]
 async fn test_jobs_endpoint_with_csrf_middleware() {
     let (job_queue, _job_receiver) = JobQueue::new(256);
     let job_store = job_queue.store.clone();
