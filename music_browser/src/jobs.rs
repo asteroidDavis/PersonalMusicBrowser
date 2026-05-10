@@ -836,6 +836,22 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    #[test]
+    fn test_job_store_clone() {
+        let store = JobStore::new();
+        let cloned = store.clone();
+        // Test that cloning works
+        assert_eq!(store.list().len(), cloned.list().len());
+    }
+
+    #[test]
+    fn test_job_store_list() {
+        let store = JobStore::new();
+        let jobs = store.list();
+        // Should be empty initially
+        assert_eq!(jobs.len(), 0);
+    }
+
     // --- Operation parse / as_str round-trips ---
 
     #[test]

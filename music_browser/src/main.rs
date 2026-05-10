@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
-        .with_skip_for(vec!["/jobs".to_string(), "/workflow".to_string()])
+        .with_skip_for(vec!["/workflow".to_string()])
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
             secure: cookie_secure,
@@ -71,6 +71,8 @@ async fn main() -> std::io::Result<()> {
     tokio::spawn(run_worker(job_receiver, job_store.clone()));
     let queue_data = web::Data::new(job_queue);
     let store_data = web::Data::new(job_store);
+
+    log::info!("JobStore registered as app_data");
 
     let protocol = if https_enabled { "https" } else { "http" };
     log::info!("Listening on {}://{bind}", protocol);

@@ -2124,6 +2124,7 @@ pub async fn jobs_list(
     store: web::Data<JobStore>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    log::info!("jobs_list handler called - JobStore and CSRF extraction succeeded");
     let jobs: Vec<JobRowView> = store.list().iter().map(job_to_row).collect();
     let tmpl = JobsTemplate {
         jobs,
