@@ -4,10 +4,8 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
 
-mod app;
-mod auth;
-mod db;
-mod jobs;
+// Import everything from the library crate to avoid shadowing conflicts
+use music_browser::{app, auth};
 
 use music_browser::db::pool;
 use music_browser::jobs::{run_worker, JobQueue};
@@ -85,6 +83,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(auth_data.clone())
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
+            .app_data(csrf_config.clone())
             .wrap(middleware::Condition::new(
                 request_auth,
                 auth::JwtMiddleware::new(auth_config.clone()),
