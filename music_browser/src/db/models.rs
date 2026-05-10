@@ -4,17 +4,57 @@ use serde::{Deserialize, Serialize};
 // Core entities
 // ============================================================================
 
+// ============================================================================
+// Groups and group memberships (multi-tenant auth)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Group {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GroupMembership {
+    pub id: i64,
+    pub group_id: i64,
+    pub group_name: String,
+    pub user_id: String, // PocketBase user ID
+    pub role: String,
+    pub joined_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGroup {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGroupMembership {
+    pub group_id: i64,
+    pub user_id: String,
+    pub role: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Instrument {
     pub id: i64,
     pub name: String,
     pub instrument_type: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Band {
     pub id: i64,
     pub name: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -22,6 +62,8 @@ pub struct Artist {
     pub id: i64,
     pub name: String,
     pub bands: Vec<Band>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -30,6 +72,8 @@ pub struct Album {
     pub title: String,
     pub released: bool,
     pub url: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 // ============================================================================
@@ -97,6 +141,8 @@ pub struct Song {
     pub time_signature: String,
     pub practice_priority: i32,
     pub artists: Vec<Artist>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 // ============================================================================
@@ -203,6 +249,8 @@ pub struct Device {
     pub device_type: String,
     pub manual_path: String,
     pub notes: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -340,6 +388,8 @@ pub struct Sample {
     pub key: String,
     pub description: String,
     pub instruments: Vec<Instrument>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 // ============================================================================
@@ -367,6 +417,8 @@ pub struct CreateSong {
     pub time_signature: String,
     pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,6 +442,8 @@ pub struct UpdateSong {
     pub time_signature: String,
     pub practice_priority: i32,
     pub artist_ids: Vec<i64>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +451,8 @@ pub struct CreateAlbum {
     pub title: String,
     pub released: bool,
     pub url: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,11 +465,15 @@ pub struct CreateArtist {
 pub struct CreateInstrument {
     pub name: String,
     pub instrument_type: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateBand {
     pub name: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +491,8 @@ pub struct CreateDevice {
     pub device_type: String,
     pub manual_path: String,
     pub notes: String,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,6 +548,8 @@ pub struct CreateSample {
     pub key: String,
     pub description: String,
     pub instrument_ids: Vec<i64>,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 // ============================================================================
@@ -586,6 +650,8 @@ pub struct PracticeExercise {
     pub description: String,
     pub source: String,
     pub sort_order: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -596,6 +662,8 @@ pub struct CreatePracticeExercise {
     pub description: String,
     pub source: String,
     pub sort_order: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -657,6 +725,8 @@ pub struct Goal {
     pub completed: bool,
     pub created_at: String,
     pub sort_order: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -667,6 +737,8 @@ pub struct CreateGoal {
     pub description: String,
     pub target_date: String,
     pub sort_order: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 // ============================================================================
@@ -740,6 +812,8 @@ pub struct LiveSet {
     pub created_at: String,
     pub songs: Vec<LiveSetSong>,
     pub actual_duration_seconds: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -760,6 +834,8 @@ pub struct CreateLiveSet {
     pub set_type: String,
     pub description: String,
     pub target_duration_seconds: i32,
+    pub owner_id: String,
+    pub group_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

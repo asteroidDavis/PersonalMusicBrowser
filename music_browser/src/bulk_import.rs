@@ -179,6 +179,8 @@ async fn ensure_instrument(
         let input = CreateInstrument {
             name: name.to_string(),
             instrument_type: instrument_type.to_string(),
+            owner_id: String::new(),
+            group_id: None,
         };
         queries::create_instrument(pool, &input).await
     }
@@ -203,6 +205,8 @@ async fn ensure_device(
             device_type: device_type.to_string(),
             manual_path: String::new(),
             notes: String::new(),
+            owner_id: String::new(),
+            group_id: None,
         };
         queries::create_device(pool, &input).await
     }
@@ -295,6 +299,8 @@ async fn import_markdown_rows(
                 time_signature: "4/4".to_string(),
                 practice_priority: 0,
                 artist_ids: vec![],
+                owner_id: String::new(),
+                group_id: None,
             };
             let id = queries::create_song(pool, &input).await?;
             stats.songs_created += 1;

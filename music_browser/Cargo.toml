@@ -40,6 +40,10 @@ path = "src/main.rs"
 name = "bulk-import"
 path = "src/bulk_import.rs"
 
+[[bin]]
+name = "migrate"
+path = "src/migrate.rs"
+
 [dev-dependencies]
 actix-rt = "2"
 actix-test = "0.1"

@@ -7,15 +7,19 @@ use super::models::*;
 // ============================================================================
 
 pub async fn list_instruments(pool: &SqlitePool) -> Result<Vec<Instrument>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, name, instrument_type FROM instruments ORDER BY name")
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, name, instrument_type, owner_id, group_id FROM instruments ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(rows
         .iter()
         .map(|r| Instrument {
             id: r.get("id"),
             name: r.get("name"),
             instrument_type: r.get("instrument_type"),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
@@ -24,11 +28,15 @@ pub async fn create_instrument(
     pool: &SqlitePool,
     input: &CreateInstrument,
 ) -> Result<i64, sqlx::Error> {
-    let result = sqlx::query("INSERT INTO instruments (name, instrument_type) VALUES (?, ?)")
-        .bind(&input.name)
-        .bind(&input.instrument_type)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "INSERT INTO instruments (name, instrument_type, owner_id, group_id) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&input.name)
+    .bind(&input.instrument_type)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
+    .execute(pool)
+    .await?;
     Ok(result.last_insert_rowid())
 }
 
@@ -45,7 +53,7 @@ pub async fn delete_instrument(pool: &SqlitePool, id: i64) -> Result<(), sqlx::E
 // ============================================================================
 
 pub async fn list_bands(pool: &SqlitePool) -> Result<Vec<Band>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, name FROM bands ORDER BY name")
+    let rows = sqlx::query("SELECT id, name, owner_id, group_id FROM bands ORDER BY name")
         .fetch_all(pool)
         .await?;
     Ok(rows
@@ -53,13 +61,17 @@ pub async fn list_bands(pool: &SqlitePool) -> Result<Vec<Band>, sqlx::Error> {
         .map(|r| Band {
             id: r.get("id"),
             name: r.get("name"),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
 
 pub async fn create_band(pool: &SqlitePool, input: &CreateBand) -> Result<i64, sqlx::Error> {
-    let result = sqlx::query("INSERT INTO bands (name) VALUES (?)")
+    let result = sqlx::query("INSERT INTO bands (name, owner_id, group_id) VALUES (?, ?, ?)")
         .bind(&input.name)
+        .bind(&input.owner_id)
+        .bind(input.group_id)
         .execute(pool)
         .await?;
     Ok(result.last_insert_rowid())
@@ -79,7 +91,7 @@ pub async fn delete_band(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> 
 
 async fn fetch_bands_for(pool: &SqlitePool, artist_id: i64) -> Result<Vec<Band>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT b.id, b.name FROM bands b \
+        "SELECT b.id, b.name, b.owner_id, b.group_id FROM bands b \
          INNER JOIN artist_bands ab ON ab.band_id = b.id \
          WHERE ab.artist_id = ?",
     )
@@ -91,12 +103,14 @@ async fn fetch_bands_for(pool: &SqlitePool, artist_id: i64) -> Result<Vec<Band>,
         .map(|r| Band {
             id: r.get("id"),
             name: r.get("name"),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
 
 pub async fn list_artists(pool: &SqlitePool) -> Result<Vec<Artist>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, name FROM artists ORDER BY name")
+    let rows = sqlx::query("SELECT id, name, owner_id, group_id FROM artists ORDER BY name")
         .fetch_all(pool)
         .await?;
 
@@ -108,13 +122,15 @@ pub async fn list_artists(pool: &SqlitePool) -> Result<Vec<Artist>, sqlx::Error>
             id,
             name: row.get("name"),
             bands,
+            owner_id: row.get("owner_id"),
+            group_id: row.get("group_id"),
         });
     }
     Ok(artists)
 }
 
 pub async fn get_artist(pool: &SqlitePool, id: i64) -> Result<Option<Artist>, sqlx::Error> {
-    let row = sqlx::query("SELECT id, name FROM artists WHERE id = ?")
+    let row = sqlx::query("SELECT id, name, owner_id, group_id FROM artists WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await?;
@@ -127,6 +143,8 @@ pub async fn get_artist(pool: &SqlitePool, id: i64) -> Result<Option<Artist>, sq
                 id: aid,
                 name: row.get("name"),
                 bands,
+                owner_id: row.get("owner_id"),
+                group_id: row.get("group_id"),
             }))
         }
         None => Ok(None),
@@ -168,9 +186,11 @@ pub async fn delete_artist(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error
 // ============================================================================
 
 pub async fn list_albums(pool: &SqlitePool) -> Result<Vec<Album>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, title, released, url FROM albums ORDER BY title")
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, title, released, url, owner_id, group_id FROM albums ORDER BY title",
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows
         .iter()
@@ -179,31 +199,40 @@ pub async fn list_albums(pool: &SqlitePool) -> Result<Vec<Album>, sqlx::Error> {
             title: r.get("title"),
             released: r.get("released"),
             url: r.get::<Option<String>, _>("url").unwrap_or_default(),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
 
 pub async fn get_album(pool: &SqlitePool, id: i64) -> Result<Option<Album>, sqlx::Error> {
-    let row = sqlx::query("SELECT id, title, released, url FROM albums WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+    let row =
+        sqlx::query("SELECT id, title, released, url, owner_id, group_id FROM albums WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
 
     Ok(row.map(|r| Album {
         id: r.get("id"),
         title: r.get("title"),
         released: r.get("released"),
         url: r.get::<Option<String>, _>("url").unwrap_or_default(),
+        owner_id: r.get("owner_id"),
+        group_id: r.get("group_id"),
     }))
 }
 
 pub async fn create_album(pool: &SqlitePool, input: &CreateAlbum) -> Result<i64, sqlx::Error> {
-    let result = sqlx::query("INSERT INTO albums (title, released, url) VALUES (?, ?, ?)")
-        .bind(&input.title)
-        .bind(input.released)
-        .bind(&input.url)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "INSERT INTO albums (title, released, url, owner_id, group_id) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&input.title)
+    .bind(input.released)
+    .bind(&input.url)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
+    .execute(pool)
+    .await?;
     Ok(result.last_insert_rowid())
 }
 
@@ -221,7 +250,7 @@ pub async fn delete_album(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error>
 
 async fn fetch_song_artists(pool: &SqlitePool, song_id: i64) -> Result<Vec<Artist>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT ar.id, ar.name FROM artists ar \
+        "SELECT ar.id, ar.name, ar.owner_id, ar.group_id FROM artists ar \
          INNER JOIN song_artists sa ON sa.artist_id = ar.id \
          WHERE sa.song_id = ?",
     )
@@ -237,6 +266,8 @@ async fn fetch_song_artists(pool: &SqlitePool, song_id: i64) -> Result<Vec<Artis
             id: aid,
             name: row.get("name"),
             bands,
+            owner_id: row.get("owner_id"),
+            group_id: row.get("group_id"),
         });
     }
     Ok(artists)
@@ -329,6 +360,8 @@ fn song_from_row(row: &sqlx::sqlite::SqliteRow, f: SongFields, artists: Vec<Arti
         time_signature: f.time_signature,
         practice_priority: f.practice_priority,
         artists,
+        owner_id: row.get("owner_id"),
+        group_id: row.get("group_id"),
     }
 }
 
@@ -336,7 +369,7 @@ const SONG_SELECT_COLS: &str = "s.id, s.title, s.album_id, COALESCE(a.title, '')
      s.sheet_music, s.lyrics, s.song_type, s.key, s.bpm_lower, s.bpm_upper, \
      s.original_artist, s.score_url, s.description, \
      s.workflow_state, s.scores_folder, s.export_folder, s.musicxml_path, \
-     s.practice_project_path, s.time_signature, s.practice_priority";
+     s.practice_project_path, s.time_signature, s.practice_priority, s.owner_id, s.group_id";
 
 pub async fn list_songs(pool: &SqlitePool) -> Result<Vec<Song>, sqlx::Error> {
     let sql = format!(
@@ -381,8 +414,8 @@ pub async fn create_song(pool: &SqlitePool, input: &CreateSong) -> Result<i64, s
         "INSERT INTO songs (title, album_id, sheet_music, lyrics, song_type, \
          key, bpm_lower, bpm_upper, original_artist, score_url, description, \
          workflow_state, scores_folder, export_folder, musicxml_path, \
-         practice_project_path, time_signature, practice_priority) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         practice_project_path, time_signature, practice_priority, owner_id, group_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.title)
     .bind(input.album_id)
@@ -402,6 +435,8 @@ pub async fn create_song(pool: &SqlitePool, input: &CreateSong) -> Result<i64, s
     .bind(&input.practice_project_path)
     .bind(&input.time_signature)
     .bind(input.practice_priority)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     let song_id = result.last_insert_rowid();
@@ -423,7 +458,7 @@ pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sq
          key = ?, bpm_lower = ?, bpm_upper = ?, original_artist = ?, \
          score_url = ?, description = ?, \
          scores_folder = ?, export_folder = ?, musicxml_path = ?, \
-         practice_project_path = ?, time_signature = ?, practice_priority = ? \
+         practice_project_path = ?, time_signature = ?, practice_priority = ?, owner_id = ?, group_id = ? \
          WHERE id = ?",
     )
     .bind(&input.title)
@@ -443,6 +478,8 @@ pub async fn update_song(pool: &SqlitePool, input: &UpdateSong) -> Result<(), sq
     .bind(&input.practice_project_path)
     .bind(&input.time_signature)
     .bind(input.practice_priority)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .bind(input.id)
     .execute(pool)
     .await?;
@@ -567,6 +604,8 @@ pub async fn list_recordings(pool: &SqlitePool) -> Result<Vec<Recording>, sqlx::
                     id: r.get("id"),
                     name: r.get("name"),
                     instrument_type: r.get("instrument_type"),
+                    owner_id: r.get("owner_id"),
+                    group_id: r.get("group_id"),
                 })
                 .collect(),
         });
@@ -621,7 +660,7 @@ pub async fn delete_recording(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Er
 
 pub async fn list_devices(pool: &SqlitePool) -> Result<Vec<Device>, sqlx::Error> {
     let rows =
-        sqlx::query("SELECT id, name, device_type, manual_path, notes FROM devices ORDER BY name")
+        sqlx::query("SELECT id, name, device_type, manual_path, notes, owner_id, group_id FROM devices ORDER BY name")
             .fetch_all(pool)
             .await?;
     Ok(rows
@@ -634,18 +673,22 @@ pub async fn list_devices(pool: &SqlitePool) -> Result<Vec<Device>, sqlx::Error>
                 .get::<Option<String>, _>("manual_path")
                 .unwrap_or_default(),
             notes: r.get::<Option<String>, _>("notes").unwrap_or_default(),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
 
 pub async fn create_device(pool: &SqlitePool, input: &CreateDevice) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
-        "INSERT INTO devices (name, device_type, manual_path, notes) VALUES (?, ?, ?, ?)",
+        "INSERT INTO devices (name, device_type, manual_path, notes, owner_id, group_id) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.name)
     .bind(&input.device_type)
     .bind(&input.manual_path)
-    .bind(&input.notes)
+    .bind(&input.name)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())
@@ -1073,7 +1116,7 @@ pub async fn delete_song_file(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Er
 
 pub async fn list_samples(pool: &SqlitePool) -> Result<Vec<Sample>, sqlx::Error> {
     let rows =
-        sqlx::query("SELECT id, name, path, bpm, key, description FROM samples ORDER BY name")
+        sqlx::query("SELECT id, name, path, bpm, key, description, owner_id, group_id FROM samples ORDER BY name")
             .fetch_all(pool)
             .await?;
 
@@ -1081,7 +1124,7 @@ pub async fn list_samples(pool: &SqlitePool) -> Result<Vec<Sample>, sqlx::Error>
     for row in &rows {
         let sid: i64 = row.get("id");
         let inst_rows = sqlx::query(
-            "SELECT i.id, i.name, i.instrument_type FROM instruments i \
+            "SELECT i.id, i.name, i.instrument_type, i.owner_id, i.group_id FROM instruments i \
              INNER JOIN sample_instruments si ON si.instrument_id = i.id \
              WHERE si.sample_id = ?",
         )
@@ -1104,8 +1147,12 @@ pub async fn list_samples(pool: &SqlitePool) -> Result<Vec<Sample>, sqlx::Error>
                     id: r.get("id"),
                     name: r.get("name"),
                     instrument_type: r.get("instrument_type"),
+                    owner_id: r.get("owner_id"),
+                    group_id: r.get("group_id"),
                 })
                 .collect(),
+            owner_id: row.get("owner_id"),
+            group_id: row.get("group_id"),
         });
     }
     Ok(samples)
@@ -1113,13 +1160,15 @@ pub async fn list_samples(pool: &SqlitePool) -> Result<Vec<Sample>, sqlx::Error>
 
 pub async fn create_sample(pool: &SqlitePool, input: &CreateSample) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
-        "INSERT INTO samples (name, path, bpm, key, description) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO samples (name, path, bpm, key, description, owner_id, group_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.name)
     .bind(&input.path)
     .bind(input.bpm)
     .bind(&input.key)
     .bind(&input.description)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     let sample_id = result.last_insert_rowid();
@@ -1374,7 +1423,7 @@ pub async fn list_songs_in_live_sets(pool: &SqlitePool) -> Result<Vec<Song>, sql
 pub async fn list_exercises(pool: &SqlitePool) -> Result<Vec<PracticeExercise>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT e.id, e.instrument_id, COALESCE(i.name, '') as instrument_name, \
-         e.name, e.category, e.description, e.source, e.sort_order \
+         e.name, e.category, e.description, e.source, e.sort_order, e.owner_id, e.group_id \
          FROM practice_exercises e \
          LEFT JOIN instruments i ON i.id = e.instrument_id \
          ORDER BY e.sort_order, e.name",
@@ -1395,6 +1444,8 @@ pub async fn list_exercises(pool: &SqlitePool) -> Result<Vec<PracticeExercise>, 
                 .unwrap_or_default(),
             source: r.get::<Option<String>, _>("source").unwrap_or_default(),
             sort_order: r.get("sort_order"),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
@@ -1405,8 +1456,8 @@ pub async fn create_exercise(
 ) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
         "INSERT INTO practice_exercises \
-         (instrument_id, name, category, description, source, sort_order) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+         (instrument_id, name, category, description, source, sort_order, owner_id, group_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(input.instrument_id)
     .bind(&input.name)
@@ -1414,6 +1465,8 @@ pub async fn create_exercise(
     .bind(&input.description)
     .bind(&input.source)
     .bind(input.sort_order)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())
@@ -1536,7 +1589,7 @@ pub async fn update_profile(
 pub async fn list_goals(pool: &SqlitePool) -> Result<Vec<Goal>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, horizon, category, title, description, target_date, \
-         completed, created_at, sort_order \
+         completed, created_at, sort_order, owner_id, group_id \
          FROM goals ORDER BY \
          CASE horizon \
            WHEN '5_year' THEN 1 WHEN '1_year' THEN 2 \
@@ -1562,14 +1615,16 @@ pub async fn list_goals(pool: &SqlitePool) -> Result<Vec<Goal>, sqlx::Error> {
             completed: r.get("completed"),
             created_at: r.get("created_at"),
             sort_order: r.get("sort_order"),
+            owner_id: r.get("owner_id"),
+            group_id: r.get("group_id"),
         })
         .collect())
 }
 
 pub async fn create_goal(pool: &SqlitePool, input: &CreateGoal) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
-        "INSERT INTO goals (horizon, category, title, description, target_date, sort_order) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO goals (horizon, category, title, description, target_date, sort_order, owner_id, group_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.horizon)
     .bind(&input.category)
@@ -1577,6 +1632,8 @@ pub async fn create_goal(pool: &SqlitePool, input: &CreateGoal) -> Result<i64, s
     .bind(&input.description)
     .bind(&input.target_date)
     .bind(input.sort_order)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())
@@ -2122,7 +2179,7 @@ pub async fn update_practice_priority(
 
 pub async fn list_live_sets(pool: &SqlitePool) -> Result<Vec<LiveSet>, sqlx::Error> {
     let set_rows = sqlx::query(
-        "SELECT id, name, set_type, description, target_duration_seconds, created_at \
+        "SELECT id, name, set_type, description, target_duration_seconds, created_at, owner_id, group_id \
          FROM live_sets ORDER BY name",
     )
     .fetch_all(pool)
@@ -2176,6 +2233,8 @@ pub async fn list_live_sets(pool: &SqlitePool) -> Result<Vec<LiveSet>, sqlx::Err
             created_at: sr.get("created_at"),
             actual_duration_seconds: actual_duration,
             songs,
+            owner_id: sr.get("owner_id"),
+            group_id: sr.get("group_id"),
         });
     }
     Ok(sets)
@@ -2188,13 +2247,15 @@ pub async fn get_live_set(pool: &SqlitePool, id: i64) -> Result<Option<LiveSet>,
 
 pub async fn create_live_set(pool: &SqlitePool, input: &CreateLiveSet) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
-        "INSERT INTO live_sets (name, set_type, description, target_duration_seconds) \
-         VALUES (?, ?, ?, ?)",
+        "INSERT INTO live_sets (name, set_type, description, target_duration_seconds, owner_id, group_id) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.name)
     .bind(&input.set_type)
     .bind(&input.description)
     .bind(input.target_duration_seconds)
+    .bind(&input.owner_id)
+    .bind(input.group_id)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())

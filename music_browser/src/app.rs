@@ -556,6 +556,8 @@ pub async fn song_create(
         time_signature: "4/4".to_string(),
         practice_priority: 0,
         artist_ids: form.artist_ids.clone(),
+        owner_id: String::new(),
+        group_id: None,
     };
     queries::create_song(&pool, &input)
         .await
@@ -652,6 +654,8 @@ pub async fn song_update(
         time_signature: existing.time_signature,
         practice_priority: existing.practice_priority,
         artist_ids: form.artist_ids.clone(),
+        owner_id: existing.owner_id,
+        group_id: existing.group_id,
     };
     queries::update_song(&pool, &input)
         .await
@@ -720,6 +724,8 @@ pub async fn album_create(
         title: form.title.clone(),
         released: form.released.as_deref() == Some("true"),
         url: form.url.clone(),
+        owner_id: String::new(),
+        group_id: None,
     };
     queries::create_album(&pool, &input)
         .await
@@ -874,6 +880,8 @@ pub async fn instrument_create(
     let input = CreateInstrument {
         name: form.0.name.clone(),
         instrument_type: it,
+        owner_id: String::new(),
+        group_id: None,
     };
     queries::create_instrument(&pool, &input)
         .await
@@ -988,6 +996,8 @@ pub async fn band_create(
 ) -> actix_web::Result<HttpResponse> {
     let input = CreateBand {
         name: form.0.name.clone(),
+        owner_id: String::new(),
+        group_id: None,
     };
     queries::create_band(&pool, &input)
         .await
@@ -1584,6 +1594,8 @@ pub async fn exercise_create(
                 description: f.description.clone(),
                 source: f.source.clone(),
                 sort_order: i as i32,
+                owner_id: String::new(),
+                group_id: None,
             },
         )
         .await
@@ -1674,6 +1686,8 @@ pub async fn goal_create(
             description: f.description,
             target_date: f.target_date,
             sort_order: f.sort_order,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2045,6 +2059,8 @@ pub async fn set_create(
         },
         description: form.description,
         target_duration_seconds: form.target_duration_seconds,
+        owner_id: String::new(),
+        group_id: None,
     };
     queries::create_live_set(&pool, &input)
         .await

@@ -1468,6 +1468,8 @@ async fn test_practice_exercise_crud() {
             description: "4-fret chromatic pattern".to_string(),
             source: "Bass Method p.12".to_string(),
             sort_order: 1,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -1525,6 +1527,8 @@ async fn test_song_exercise_link() {
             description: String::new(),
             source: String::new(),
             sort_order: 0,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -1674,6 +1678,8 @@ async fn test_goals_crud() {
             description: "For the new cover".to_string(),
             target_date: "2026-04-05".to_string(),
             sort_order: 0,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -1819,6 +1825,8 @@ async fn test_schedule_generation() {
             description: String::new(),
             source: String::new(),
             sort_order: 0,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -1909,6 +1917,8 @@ async fn test_song_new_fields_persist() {
             time_signature: "4/4".to_string(),
             practice_priority: 0,
             artist_ids: vec![],
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2032,6 +2042,8 @@ async fn test_practice_fields_persist() {
             time_signature: "3/4".to_string(),
             practice_priority: 2,
             artist_ids: vec![],
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2136,6 +2148,8 @@ async fn test_live_set_crud() {
             set_type: "live".to_string(),
             description: "Opening set".to_string(),
             target_duration_seconds: 2700,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2185,6 +2199,8 @@ async fn test_live_set_songs() {
             set_type: "live".to_string(),
             description: String::new(),
             target_duration_seconds: 1800,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2360,6 +2376,8 @@ async fn test_priority_weighted_schedule_generation() {
             description: String::new(),
             source: String::new(),
             sort_order: 0,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await
@@ -2442,6 +2460,8 @@ async fn make_goal(pool: &SqlitePool) -> i64 {
             description: String::new(),
             target_date: String::new(),
             sort_order: 0,
+            owner_id: String::new(),
+            group_id: None,
         },
     )
     .await

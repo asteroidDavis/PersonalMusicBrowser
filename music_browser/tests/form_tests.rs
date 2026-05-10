@@ -123,6 +123,8 @@ mod app {
             time_signature: "4/4".to_string(),
             practice_priority: 0,
             artist_ids: form.artist_ids.clone(),
+            owner_id: String::new(),
+            group_id: None,
         };
         queries::create_song(&pool, &input)
             .await
