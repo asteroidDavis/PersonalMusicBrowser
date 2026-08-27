@@ -4,6 +4,22 @@
 
 A lightweight music production planning app built with **Rust**, **Actix-web**, **Askama** templates, and **SQLite** (via SQLx).
 ![Songs screen.png](Songs%20screen.png)
+
+## Access Control Architecture
+
+Resource data remains in SQLite while PocketBase provides authentication and fine-grained access metadata. Actix validates the PocketBase JWT, queries SQLite for music resources, and uses PocketBase `shares`, `groups`, `group_memberships`, and `group_shares` records to decide whether a resource should be visible or editable.
+
+The initial ReBAC collections are:
+
+| Collection | Purpose |
+|---|---|
+| `shares` | Direct user-to-resource grants with `viewer`, `editor`, or `admin` access |
+| `groups` | Human-friendly sharing lists owned by a user |
+| `group_memberships` | Users included in a group with owner/admin/member/viewer roles |
+| `group_shares` | Resource grants applied to a group for bulk sharing |
+
+When `AUTH_REQUIRE_LOGIN=true`, protected handlers should return `404` for resources without an owner/share relationship so unauthorized resources are invisible.
+
 ## Model Diagram
 
 ```

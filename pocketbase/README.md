@@ -68,6 +68,104 @@ If PocketBase reports user ID conflicts, leave the record `id` field blank. Pock
 
 Before deploying, replace the permissive create rule with a hardened registration policy that includes email verification, rate limiting, and abuse controls.
 
+## ReBAC collections
+
+The Rust app stores music resources in SQLite and stores access metadata in PocketBase. Create these base collections before enabling `AUTH_REQUIRE_LOGIN=true` for real use.
+
+### `shares`
+
+Create a base collection named `shares` with these fields:
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `user_id` | text | yes | PocketBase `users` record id receiving access |
+| `resource_type` | text | yes | Resource type such as `song`, `album`, or `instrument` |
+| `resource_id` | text | yes | SQLite id for the resource |
+| `access_level` | select | yes | Values: `viewer`, `editor`, `admin` |
+| `created_by` | text | yes | PocketBase `users` record id that created the share |
+
+Recommended indexes:
+
+```text
+user_id, resource_type, resource_id
+resource_type, resource_id
+created_by
+```
+
+Starter API rules:
+
+```text
+List/Search: @request.auth.id != "" && (user_id = @request.auth.id || created_by = @request.auth.id)
+View:        @request.auth.id != "" && (user_id = @request.auth.id || created_by = @request.auth.id)
+Create:      @request.auth.id != "" && created_by = @request.auth.id
+Update:      @request.auth.id != "" && created_by = @request.auth.id
+Delete:      @request.auth.id != "" && created_by = @request.auth.id
+```
+
+### `groups`
+
+Create a base collection named `groups` with these fields:
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `name` | text | yes | Display name |
+| `description` | text | no | Optional description |
+| `owner_id` | text | yes | PocketBase `users` record id that owns the group |
+
+Starter API rules:
+
+```text
+List/Search: @request.auth.id != ""
+View:        @request.auth.id != ""
+Create:      @request.auth.id != "" && owner_id = @request.auth.id
+Update:      @request.auth.id != "" && owner_id = @request.auth.id
+Delete:      @request.auth.id != "" && owner_id = @request.auth.id
+```
+
+### `group_memberships`
+
+Create a base collection named `group_memberships` with these fields:
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `group_id` | text | yes | PocketBase `groups` record id |
+| `user_id` | text | yes | PocketBase `users` record id |
+| `role` | select | yes | Values: `owner`, `admin`, `member`, `viewer` |
+
+Starter API rules:
+
+```text
+List/Search: @request.auth.id != "" && user_id = @request.auth.id
+View:        @request.auth.id != "" && user_id = @request.auth.id
+Create:      @request.auth.id != ""
+Update:      @request.auth.id != ""
+Delete:      @request.auth.id != ""
+```
+
+### `group_shares`
+
+Create a base collection named `group_shares` with these fields:
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `group_id` | text | yes | PocketBase `groups` record id receiving access |
+| `resource_type` | text | yes | Resource type such as `song`, `album`, or `instrument` |
+| `resource_id` | text | yes | SQLite id for the resource |
+| `access_level` | select | yes | Values: `viewer`, `editor`, `admin` |
+| `created_by` | text | yes | PocketBase `users` record id that created the group share |
+
+Starter API rules:
+
+```text
+List/Search: @request.auth.id != ""
+View:        @request.auth.id != ""
+Create:      @request.auth.id != "" && created_by = @request.auth.id
+Update:      @request.auth.id != "" && created_by = @request.auth.id
+Delete:      @request.auth.id != "" && created_by = @request.auth.id
+```
+
+The starter rules are intentionally simple for local rollout. Before production, tighten group membership and group share mutations so only group owners/admins can manage membership and only resource admins can share resources.
+
 ## Rust app configuration
 
 Copy `music_browser/.env.example` to `music_browser/.env` and set:

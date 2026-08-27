@@ -1,6 +1,6 @@
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::error::{Error, ErrorBadRequest, ErrorUnauthorized};
-use actix_web::{web, HttpResponse, ResponseError};
+use actix_web::{web, HttpMessage, HttpResponse, ResponseError};
 use askama::Template;
 use futures_util::future::LocalBoxFuture;
 use log::{info, warn};
@@ -67,6 +67,18 @@ pub struct AuthConfig {
     pub require_login: bool,
     pub pocketbase_ca_cert: Option<String>,
     pub public_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUser {
+    pub id: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone)]
+struct VerifiedToken {
+    token: String,
+    user_id: String,
 }
 
 impl AuthConfig {
@@ -171,7 +183,7 @@ fn is_public_path(path: &str, config: &AuthConfig) -> bool {
 async fn verify_token_with_pocketbase(
     token: &str,
     config: &AuthConfig,
-) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<VerifiedToken>, Box<dyn std::error::Error + Send + Sync>> {
     let client = config.build_client()?;
     let response = client
         .post(config.auth_refresh_url())
@@ -181,10 +193,25 @@ async fn verify_token_with_pocketbase(
 
     if response.status().is_success() {
         let pb_res: serde_json::Value = response.json().await.unwrap_or_default();
+        let user_id = pb_res
+            .get("record")
+            .and_then(|record| record.get("id"))
+            .and_then(|id| id.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if user_id.is_empty() {
+            return Ok(None);
+        }
         if let Some(new_token) = pb_res.get("token").and_then(|t| t.as_str()) {
-            Ok(Some(new_token.to_string()))
+            Ok(Some(VerifiedToken {
+                token: new_token.to_string(),
+                user_id,
+            }))
         } else {
-            Ok(None)
+            Ok(Some(VerifiedToken {
+                token: token.to_string(),
+                user_id,
+            }))
         }
     } else {
         Err(Box::new(std::io::Error::other(format!(
@@ -294,26 +321,17 @@ where
             }
 
             // Verify token using PocketBase's auth-refresh endpoint
-            let (token_valid, original_token) = if let Some(ref token) = token_opt {
+            let (verified_token, original_token) = if let Some(ref token) = token_opt {
                 match verify_token_with_pocketbase(token, &config).await {
-                    Ok(Some(new_token)) => {
-                        // Token is valid and was refreshed
+                    Ok(Some(verified)) => {
                         info!(
                             "[AUTH_SUCCESS] Token verified and refreshed for request to {}",
                             req.path()
                         );
-                        (Some(new_token), Some(token.clone()))
+                        (Some(verified), Some(token.clone()))
                     }
-                    Ok(None) => {
-                        // Token is valid but not refreshed
-                        info!(
-                            "[AUTH_SUCCESS] Token verified for request to {}",
-                            req.path()
-                        );
-                        (Some(token.clone()), Some(token.clone()))
-                    }
+                    Ok(None) => (None, Some(token.clone())),
                     Err(_) => {
-                        // Token is invalid
                         warn!("[AUTH_FAILED] Invalid token for request to {}", req.path());
                         (None, Some(token.clone()))
                     }
@@ -327,7 +345,7 @@ where
                 return Ok(res);
             }
 
-            if token_valid.is_none() {
+            if verified_token.is_none() {
                 if req.path() != "/login" {
                     info!("[AUTH_REDIRECT] Redirecting unauthorized request to /login");
                     return Err(AuthRedirectError.into());
@@ -335,18 +353,23 @@ where
                 return Err(ErrorUnauthorized("Unauthorized"));
             }
 
-            // If token was refreshed, update the response with new cookie
+            if let Some(verified) = verified_token.clone() {
+                req.extensions_mut().insert(AuthenticatedUser {
+                    id: verified.user_id,
+                    token: verified.token.clone(),
+                });
+            }
+
             let mut res = service.call(req).await?;
-            if let Some(refreshed_token) = token_valid {
+            if let Some(verified) = verified_token {
                 if let Some(original) = original_token {
-                    if refreshed_token != original {
-                        let cookie =
-                            actix_web::cookie::Cookie::build("auth_token", refreshed_token)
-                                .path("/")
-                                .http_only(true)
-                                .secure(config.cookie_secure)
-                                .same_site(actix_web::cookie::SameSite::Lax)
-                                .finish();
+                    if verified.token != original {
+                        let cookie = actix_web::cookie::Cookie::build("auth_token", verified.token)
+                            .path("/")
+                            .http_only(true)
+                            .secure(config.cookie_secure)
+                            .same_site(actix_web::cookie::SameSite::Lax)
+                            .finish();
                         res.response_mut().add_cookie(&cookie).ok();
                     }
                 }
