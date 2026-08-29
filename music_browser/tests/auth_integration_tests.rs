@@ -27,7 +27,6 @@ fn csrf_middleware() -> CsrfMiddleware {
     let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
-            secure: true, // Tests use secure=true to match HTTPS configuration
             same_site: actix_web::cookie::SameSite::Strict,
         });
     CsrfMiddleware::new(csrf_config)

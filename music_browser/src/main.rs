@@ -58,9 +58,9 @@ async fn main() -> std::io::Result<()> {
         .with_skip_for(vec!["/workflow".to_string()])
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
-            secure: cookie_secure,
             same_site,
-        });
+        })
+        .with_secure(cookie_secure);
 
     if csrf_secret == "change-me-to-a-secure-random-32-byte-secret" {
         log::warn!(

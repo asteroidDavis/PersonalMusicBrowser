@@ -22,9 +22,9 @@ async fn test_all_get_endpoints() {
         CsrfMiddlewareConfig::double_submit_cookie(b"test-secret-32-bytes-long-for-testing-!!")
             .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
                 http_only: false,
-                secure: false,
                 same_site: SameSite::Lax,
-            });
+            })
+            .with_secure(false);
 
     let app = test::init_service(
         App::new()
@@ -126,9 +126,9 @@ async fn test_form_post_endpoints() {
         CsrfMiddlewareConfig::double_submit_cookie(b"test-secret-32-bytes-long-for-testing-!!")
             .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
                 http_only: false,
-                secure: false,
                 same_site: SameSite::Lax,
-            });
+            })
+            .with_secure(false);
 
     let app = test::init_service(
         App::new()
@@ -238,9 +238,9 @@ async fn test_button_endpoints() {
         CsrfMiddlewareConfig::double_submit_cookie(b"test-secret-32-bytes-long-for-testing-!!")
             .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
                 http_only: false,
-                secure: false,
                 same_site: SameSite::Lax,
-            });
+            })
+            .with_secure(false);
 
     let app = test::init_service(
         App::new()
