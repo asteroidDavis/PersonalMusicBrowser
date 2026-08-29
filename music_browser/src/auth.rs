@@ -360,8 +360,19 @@ where
                 });
             }
 
+            let existing_id = req.cookie("id").map(|c| c.value().to_string());
+
             let mut res = service.call(req).await?;
             if let Some(verified) = verified_token {
+                if existing_id.as_deref() != Some(verified.user_id.as_str()) {
+                    let id_cookie = actix_web::cookie::Cookie::build("id", verified.user_id)
+                        .path("/")
+                        .http_only(true)
+                        .secure(config.cookie_secure)
+                        .same_site(actix_web::cookie::SameSite::Lax)
+                        .finish();
+                    res.response_mut().add_cookie(&id_cookie).ok();
+                }
                 if let Some(original) = original_token {
                     if verified.token != original {
                         let cookie = actix_web::cookie::Cookie::build("auth_token", verified.token)
@@ -488,10 +499,20 @@ pub async fn signup_submit(
 
     match res {
         Ok(response) if response.status().is_success() => {
+            let pb_res: serde_json::Value = response.json().await.unwrap_or_default();
             info!("[AUTH_SUCCESS] User signup completed.");
-            Ok(HttpResponse::SeeOther()
-                .append_header(("Location", "/login"))
-                .finish())
+            let mut resp = HttpResponse::SeeOther();
+            resp.append_header(("Location", "/login"));
+            if let Some(id) = pb_res.get("id").and_then(|v| v.as_str()) {
+                let id_cookie = actix_web::cookie::Cookie::build("id", id.to_string())
+                    .path("/")
+                    .http_only(true)
+                    .secure(config.cookie_secure)
+                    .same_site(actix_web::cookie::SameSite::Lax)
+                    .finish();
+                resp.cookie(id_cookie);
+            }
+            Ok(resp.finish())
         }
         Ok(response) => {
             let status = response.status();
@@ -560,21 +581,40 @@ pub async fn login_submit(
         Ok(response) if response.status().is_success() => {
             let pb_res: serde_json::Value = response.json().await.unwrap_or_default();
             if let Some(token) = pb_res.get("token").and_then(|t| t.as_str()) {
-                let cookie = actix_web::cookie::Cookie::build("auth_token", token.to_string())
+                let user_id = pb_res
+                    .get("record")
+                    .and_then(|r| r.get("id"))
+                    .and_then(|v| v.as_str());
+
+                let mut resp = HttpResponse::SeeOther();
+                resp.append_header(("Location", "/"));
+
+                let auth_cookie = actix_web::cookie::Cookie::build("auth_token", token.to_string())
                     .path("/")
                     .http_only(true)
                     .secure(config.cookie_secure)
+                    .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
+                resp.cookie(auth_cookie);
 
                 let flag_cookie = actix_web::cookie::Cookie::build("auth_present", "1")
                     .path("/")
                     .secure(config.cookie_secure)
+                    .same_site(actix_web::cookie::SameSite::Lax)
                     .finish();
-                return Ok(HttpResponse::SeeOther()
-                    .append_header(("Location", "/"))
-                    .cookie(cookie)
-                    .cookie(flag_cookie)
-                    .finish());
+                resp.cookie(flag_cookie);
+
+                if let Some(id) = user_id {
+                    let id_cookie = actix_web::cookie::Cookie::build("id", id.to_string())
+                        .path("/")
+                        .http_only(true)
+                        .secure(config.cookie_secure)
+                        .same_site(actix_web::cookie::SameSite::Lax)
+                        .finish();
+                    resp.cookie(id_cookie);
+                }
+
+                return Ok(resp.finish());
             }
         }
         Ok(response) => {
@@ -608,19 +648,36 @@ pub async fn login_submit(
         .body(html))
 }
 
-pub async fn logout(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Result<HttpResponse> {
+pub async fn logout(
+    _csrf: actix_csrf_middleware::CsrfToken,
+    config: web::Data<AuthConfig>,
+) -> actix_web::Result<HttpResponse> {
     let mut cookie = actix_web::cookie::Cookie::named("auth_token");
     cookie.make_removal();
     cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_secure(config.cookie_secure);
+    cookie.set_same_site(actix_web::cookie::SameSite::Lax);
 
     let mut flag_cookie = actix_web::cookie::Cookie::named("auth_present");
     flag_cookie.make_removal();
     flag_cookie.set_path("/");
+    flag_cookie.set_http_only(false);
+    flag_cookie.set_secure(config.cookie_secure);
+    flag_cookie.set_same_site(actix_web::cookie::SameSite::Lax);
+
+    let mut id_cookie = actix_web::cookie::Cookie::named("id");
+    id_cookie.make_removal();
+    id_cookie.set_path("/");
+    id_cookie.set_http_only(true);
+    id_cookie.set_secure(config.cookie_secure);
+    id_cookie.set_same_site(actix_web::cookie::SameSite::Lax);
 
     Ok(HttpResponse::SeeOther()
         .append_header(("Location", "/login"))
         .cookie(cookie)
         .cookie(flag_cookie)
+        .cookie(id_cookie)
         .finish())
 }
 
