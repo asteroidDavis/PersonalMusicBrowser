@@ -55,7 +55,6 @@ async fn main() -> std::io::Result<()> {
     };
 
     let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
-        .with_skip_for(vec!["/workflow".to_string()])
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
             same_site,
