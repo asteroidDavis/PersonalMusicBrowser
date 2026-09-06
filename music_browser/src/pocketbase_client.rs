@@ -22,7 +22,8 @@ impl PocketBaseClientError {
         match self {
             PocketBaseClientError::Status { status, body } => {
                 *status == StatusCode::NOT_FOUND
-                    && body.contains("Missing or invalid collection context")
+                    && (body.contains("Missing collection context")
+                        || body.contains("Missing or invalid collection context"))
             }
             PocketBaseClientError::Request(_) => false,
         }
