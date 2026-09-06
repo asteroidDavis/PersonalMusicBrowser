@@ -16,8 +16,8 @@ repos:
         files: \.rs$
 
       - id: cargo-test
-        name: cargo test
-        entry: cargo test --manifest-path music_browser/Cargo.toml
+        name: cargo test (with PocketBase ACL integration tests)
+        entry: music_browser/scripts/run-pocketbase-integration-tests.sh
         language: system
         pass_filenames: false
-        files: \.(rs|sql|html)$
+        files: \.(rs|sql|html|js)$

@@ -1,0 +1,5 @@
+
+[advisories]
+# EXPIRES: 2026-11-01
+# REASON: actix-test is bound to localhost; waiting for actix-web 4.x to bump h2.
+ignore = ["RUSTSEC-2026-0258"]

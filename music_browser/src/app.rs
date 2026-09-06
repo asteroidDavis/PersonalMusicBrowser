@@ -3,9 +3,13 @@ use actix_web::dev::Payload;
 use actix_web::{web, FromRequest, HttpRequest, HttpResponse};
 use askama::Template;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::acl::{
+    AccessLevel, CreateGroup, CreateGroupMember, CreateGroupShare, CreateShare, GroupRole,
+    ResourceType,
+};
 use crate::auth;
 use crate::db::models::*;
 use crate::db::queries;
@@ -13,6 +17,8 @@ use crate::jobs::{
     check_hydration, HydrationStatus, JobQueue, JobRecord, JobStatus, JobStore, Operation,
     TargetType, WorkflowJob,
 };
+use crate::permissions;
+use crate::pocketbase_client::PocketBaseClient;
 
 /// Extract the `Referer` header from a request, falling back to `default`.
 pub fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
@@ -25,6 +31,74 @@ pub fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
     HttpResponse::SeeOther()
         .insert_header(("Location", loc))
         .finish()
+}
+
+async fn grant_creator_admin_share_if_authenticated(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    resource_type: ResourceType,
+    resource_id: i64,
+) -> actix_web::Result<()> {
+    let Some(user) = permissions::authenticated_user(req) else {
+        return Ok(());
+    };
+    let Some(pocketbase) = pocketbase else {
+        log::warn!(
+            "[ACL_SHARE_SKIPPED] PocketBase client missing for resource_type={} resource_id={} user_id={}",
+            resource_type,
+            resource_id,
+            user.id
+        );
+        return Ok(());
+    };
+    match permissions::grant_creator_admin_share(pocketbase, &user, resource_type, resource_id)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(permissions::PermissionError::MissingAclCollections) => {
+            log::warn!(
+                "[ACL_SHARE_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
+                resource_type,
+                resource_id,
+                user.id
+            );
+            Ok(())
+        }
+        Err(err) => Err(actix_web::Error::from(err)),
+    }
+}
+
+async fn require_edit_access_if_authenticated(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    resource_type: ResourceType,
+    resource_id: i64,
+) -> actix_web::Result<()> {
+    let Some(user) = permissions::authenticated_user(req) else {
+        return Ok(());
+    };
+    let Some(pocketbase) = pocketbase else {
+        log::warn!(
+            "[ACL_CHECK_SKIPPED] PocketBase client missing for resource_type={} resource_id={} user_id={}",
+            resource_type,
+            resource_id,
+            user.id
+        );
+        return Ok(());
+    };
+    match permissions::require_edit_access(pocketbase, &user, resource_type, resource_id).await {
+        Ok(_) => Ok(()),
+        Err(permissions::PermissionError::MissingAclCollections) => {
+            log::warn!(
+                "[ACL_CHECK_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
+                resource_type,
+                resource_id,
+                user.id
+            );
+            Ok(())
+        }
+        Err(err) => Err(actix_web::Error::from(err)),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +605,9 @@ pub async fn song_new(
 }
 
 pub async fn song_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
@@ -557,21 +633,31 @@ pub async fn song_create(
         practice_priority: 0,
         artist_ids: form.artist_ids.clone(),
     };
-    queries::create_song(&pool, &input)
+    let song_id = queries::create_song(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Song,
+        song_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/"))
         .finish())
 }
 
 pub async fn song_edit(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     query: web::Query<std::collections::HashMap<String, String>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, id).await?;
     let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, id)
         .await
@@ -621,12 +707,16 @@ pub async fn song_edit(
 }
 
 pub async fn song_update(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<SongFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let existing = queries::get_song(&pool, song_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?
@@ -667,11 +757,16 @@ pub async fn song_update(
 }
 
 pub async fn song_delete(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_song(&pool, path.into_inner())
+    let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
+    queries::delete_song(&pool, song_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -712,7 +807,9 @@ pub async fn album_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Re
 }
 
 pub async fn album_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<AlbumFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
@@ -721,9 +818,16 @@ pub async fn album_create(
         released: form.released.as_deref() == Some("true"),
         url: form.url.clone(),
     };
-    queries::create_album(&pool, &input)
+    let album_id = queries::create_album(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Album,
+        album_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/albums"))
         .finish())
@@ -800,7 +904,9 @@ pub async fn artist_new(
 }
 
 pub async fn artist_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<ArtistFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
@@ -808,9 +914,16 @@ pub async fn artist_create(
         name: form.name.clone(),
         band_ids: form.band_ids.clone(),
     };
-    queries::create_artist(&pool, &input)
+    let artist_id = queries::create_artist(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Artist,
+        artist_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/artists"))
         .finish())
@@ -863,7 +976,9 @@ pub async fn instrument_new(
 }
 
 pub async fn instrument_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<InstrumentFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let it = if form.0.instrument_type.is_empty() {
@@ -875,9 +990,16 @@ pub async fn instrument_create(
         name: form.0.name.clone(),
         instrument_type: it,
     };
-    queries::create_instrument(&pool, &input)
+    let instrument_id = queries::create_instrument(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Instrument,
+        instrument_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/instruments"))
         .finish())
@@ -983,15 +1105,24 @@ pub async fn band_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Res
 }
 
 pub async fn band_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<BandFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let input = CreateBand {
         name: form.0.name.clone(),
     };
-    queries::create_band(&pool, &input)
+    let band_id = queries::create_band(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Band,
+        band_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/bands"))
         .finish())
@@ -1092,11 +1223,15 @@ pub async fn production_list(
 }
 
 pub async fn stage_new(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let song = queries::get_song(&pool, song_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?
@@ -1114,14 +1249,18 @@ pub async fn stage_new(
 pub async fn stage_create(
     req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<StageFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
+    let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
     let input = CreateProductionStage {
-        song_id: path.into_inner(),
+        song_id,
         stage: form.stage,
         status,
     };
@@ -1222,12 +1361,16 @@ pub async fn step_update_status(
 }
 
 pub async fn song_file_new(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     query: web::Query<std::collections::HashMap<String, String>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, song_id)
         .await
@@ -1249,14 +1392,19 @@ pub async fn song_file_new(
 }
 
 pub async fn song_file_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<SongFileFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
+    let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let input = CreateSongFile {
-        song_id: path.into_inner(),
+        song_id,
         file_type: form.file_type,
         path: form.path,
         instrument_id: form.instrument_id,
@@ -1291,11 +1439,16 @@ pub async fn song_file_delete(
 // ---------------------------------------------------------------------------
 
 pub async fn auto_add_stages(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::auto_add_stages(&pool, path.into_inner())
+    let song_id = path.into_inner();
+    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
+    queries::auto_add_stages(&pool, song_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())
@@ -1560,7 +1713,9 @@ pub async fn exercise_new(
 }
 
 pub async fn exercise_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<ExerciseFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
@@ -1575,7 +1730,7 @@ pub async fn exercise_create(
 
     // Create each exercise with auto-incrementing sort_order
     for (i, name) in exercise_names.iter().enumerate() {
-        queries::create_exercise(
+        let exercise_id = queries::create_exercise(
             &pool,
             &CreatePracticeExercise {
                 instrument_id: None, // No instrument-specific selection
@@ -1588,6 +1743,13 @@ pub async fn exercise_create(
         )
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+        grant_creator_admin_share_if_authenticated(
+            &req,
+            pocketbase.as_ref(),
+            ResourceType::PracticeExercise,
+            exercise_id,
+        )
+        .await?;
     }
 
     Ok(HttpResponse::SeeOther()
@@ -1661,11 +1823,13 @@ pub async fn goal_new(_csrf: actix_csrf_middleware::CsrfToken) -> actix_web::Res
 }
 
 pub async fn goal_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<GoalFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let f = form.0;
-    queries::create_goal(
+    let goal_id = queries::create_goal(
         &pool,
         &CreateGoal {
             horizon: f.horizon,
@@ -1678,6 +1842,13 @@ pub async fn goal_create(
     )
     .await
     .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Goal,
+        goal_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/goals"))
         .finish())
@@ -2032,7 +2203,9 @@ pub async fn set_new(
 }
 
 pub async fn set_create(
+    req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<SetFormData>,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
@@ -2046,9 +2219,16 @@ pub async fn set_create(
         description: form.description,
         target_duration_seconds: form.target_duration_seconds,
     };
-    queries::create_live_set(&pool, &input)
+    let set_id = queries::create_live_set(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    grant_creator_admin_share_if_authenticated(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::LiveSet,
+        set_id,
+    )
+    .await?;
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/sets"))
         .finish())
@@ -2357,6 +2537,141 @@ fn find_wav_inputs(root: &str) -> actix_web::Result<Vec<String>> {
     out.sort();
     Ok(out)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ShareRequest {
+    pub user_id: String,
+    pub resource_type: String,
+    pub resource_id: String,
+    pub access_level: AccessLevel,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ShareResponse {
+    pub id: String,
+}
+
+pub async fn share_create(
+    req: HttpRequest,
+    pocketbase: web::Data<PocketBaseClient>,
+    payload: web::Json<ShareRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let user = permissions::authenticated_user(&req)
+        .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let share = CreateShare {
+        user_id: payload.user_id.clone(),
+        resource_type: payload.resource_type.clone(),
+        resource_id: payload.resource_id.clone(),
+        access_level: payload.access_level,
+        created_by: user.id.clone(),
+    };
+    let created = pocketbase
+        .create_share(&user.token, &share)
+        .await
+        .map_err(|err| {
+            log::warn!("[ACL_SHARE_FAILED] user_id={} error={}", user.id, err);
+            actix_web::error::ErrorInternalServerError(auth::ERR_INTERNAL_ERROR.message)
+        })?;
+    Ok(HttpResponse::Created().json(ShareResponse { id: created.id }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupRequest {
+    pub name: String,
+    pub description: String,
+}
+
+pub async fn group_create(
+    req: HttpRequest,
+    pocketbase: web::Data<PocketBaseClient>,
+    payload: web::Json<GroupRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let user = permissions::authenticated_user(&req)
+        .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let group = CreateGroup {
+        name: payload.name.clone(),
+        description: payload.description.clone(),
+        owner_id: user.id.clone(),
+    };
+    let created = pocketbase
+        .create_group(&user.token, &group)
+        .await
+        .map_err(|err| {
+            log::warn!(
+                "[ACL_GROUP_CREATE_FAILED] user_id={} error={}",
+                user.id,
+                err
+            );
+            actix_web::error::ErrorInternalServerError(auth::ERR_INTERNAL_ERROR.message)
+        })?;
+    Ok(HttpResponse::Created().json(created))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupMemberRequest {
+    pub user_id: String,
+    pub role: GroupRole,
+}
+
+pub async fn group_member_add(
+    req: HttpRequest,
+    pocketbase: web::Data<PocketBaseClient>,
+    path: web::Path<String>,
+    payload: web::Json<GroupMemberRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let user = permissions::authenticated_user(&req)
+        .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let member = CreateGroupMember {
+        group_id: path.into_inner(),
+        user_id: payload.user_id.clone(),
+        role: payload.role,
+    };
+    let created = pocketbase
+        .add_user_to_group(&user.token, &member)
+        .await
+        .map_err(|err| {
+            log::warn!(
+                "[ACL_GROUP_MEMBER_ADD_FAILED] user_id={} error={}",
+                user.id,
+                err
+            );
+            actix_web::error::ErrorInternalServerError(auth::ERR_INTERNAL_ERROR.message)
+        })?;
+    Ok(HttpResponse::Created().json(created))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupShareRequest {
+    pub resource_type: String,
+    pub resource_id: String,
+    pub access_level: AccessLevel,
+}
+
+pub async fn group_share_create(
+    req: HttpRequest,
+    pocketbase: web::Data<PocketBaseClient>,
+    path: web::Path<String>,
+    payload: web::Json<GroupShareRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let user = permissions::authenticated_user(&req)
+        .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let group_share = CreateGroupShare {
+        group_id: path.into_inner(),
+        resource_type: payload.resource_type.clone(),
+        resource_id: payload.resource_id.clone(),
+        access_level: payload.access_level,
+        created_by: user.id.clone(),
+    };
+    let created = pocketbase
+        .share_with_group(&user.token, &group_share)
+        .await
+        .map_err(|err| {
+            log::warn!("[ACL_GROUP_SHARE_FAILED] user_id={} error={}", user.id, err);
+            actix_web::error::ErrorInternalServerError(auth::ERR_INTERNAL_ERROR.message)
+        })?;
+    Ok(HttpResponse::Created().json(created))
+}
+
 pub fn configure_app(cfg: &mut web::ServiceConfig) {
     cfg
         // Auth
@@ -2365,6 +2680,14 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
         .route("/signup", web::get().to(auth::signup_view))
         .route("/signup", web::post().to(auth::signup_submit))
         .route("/logout", web::post().to(auth::logout))
+        // Access control
+        .route("/api/shares", web::post().to(share_create))
+        .route("/api/groups", web::post().to(group_create))
+        .route("/api/groups/{id}/members", web::post().to(group_member_add))
+        .route(
+            "/api/groups/{id}/shares",
+            web::post().to(group_share_create),
+        )
         // Songs
         .route("/", web::get().to(song_list))
         .route("/songs/new", web::get().to(song_new))

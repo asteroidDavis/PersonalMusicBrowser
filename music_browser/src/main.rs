@@ -9,6 +9,7 @@ use music_browser::{app, auth};
 
 use music_browser::db::pool;
 use music_browser::jobs::{run_worker, JobQueue};
+use music_browser::pocketbase_client::PocketBaseClient;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -26,6 +27,9 @@ async fn main() -> std::io::Result<()> {
     let bind = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".into());
     let auth_config = auth::AuthConfig::from_env();
     let auth_data = web::Data::new(auth_config.clone());
+    let pocketbase_client = PocketBaseClient::from_auth_config(&auth_config)
+        .expect("Failed to initialise PocketBase client");
+    let pocketbase_data = web::Data::new(pocketbase_client);
 
     // CSRF middleware configuration
     let csrf_secret = std::env::var("CSRF_SECRET")
@@ -51,12 +55,11 @@ async fn main() -> std::io::Result<()> {
     };
 
     let csrf_config = CsrfMiddlewareConfig::double_submit_cookie(csrf_secret.as_bytes())
-        .with_skip_for(vec!["/workflow".to_string()])
         .with_token_cookie_config(actix_csrf_middleware::CsrfDoubleSubmitCookie {
             http_only: false,
-            secure: cookie_secure,
             same_site,
-        });
+        })
+        .with_secure(cookie_secure);
 
     if csrf_secret == "change-me-to-a-secure-random-32-byte-secret" {
         log::warn!(
@@ -81,6 +84,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(pool_data.clone())
             .app_data(auth_data.clone())
+            .app_data(pocketbase_data.clone())
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
             .app_data(csrf_config.clone())

@@ -19,8 +19,8 @@ cargo fmt -- --check || { echo "❌ fmt failed. Run: cargo fmt"; exit 1; }
 echo "==> cargo clippy"
 cargo clippy -- -D warnings || { echo "❌ clippy failed"; exit 1; }
 
-echo "==> cargo test"
-cargo test || { echo "❌ tests failed"; exit 1; }
+echo "==> cargo test (with PocketBase ACL integration tests)"
+scripts/run-pocketbase-integration-tests.sh || { echo "❌ tests failed"; exit 1; }
 
 echo "✅ All pre-commit checks passed"
 EOF

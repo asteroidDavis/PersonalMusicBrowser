@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  POCKETBASE_VERSION: "0.38.0"
 
 jobs:
   # =========================================================================
@@ -74,10 +75,23 @@ jobs:
             ~/.cargo/git
             music_browser/target
           key: ${{ runner.os }}-cargo-test-${{ matrix.rust }}-${{ hashFiles('music_browser/Cargo.lock') }}
+      - name: cache pocketbase binary
+        uses: actions/cache@v4
+        with:
+          path: pocketbase/pocketbase
+          key: ${{ runner.os }}-pocketbase-${{ env.POCKETBASE_VERSION }}
+      - name: install pocketbase (for ACL integration tests)
+        run: |
+          if [ ! -x pocketbase/pocketbase ]; then
+            curl -sSL -o /tmp/pocketbase.zip \
+              "https://github.com/pocketbase/pocketbase/releases/download/v${POCKETBASE_VERSION}/pocketbase_${POCKETBASE_VERSION}_linux_amd64.zip"
+            unzip -o /tmp/pocketbase.zip -d pocketbase
+          fi
+          chmod +x pocketbase/pocketbase
       - name: cargo test + timing
         run: |
           START=$(date +%s)
-          cargo test --manifest-path music_browser/Cargo.toml
+          music_browser/scripts/run-pocketbase-integration-tests.sh
           END=$(date +%s)
           echo $((END - START)) > rust-test-${{ matrix.rust }}.sec
       - uses: actions/upload-artifact@v4

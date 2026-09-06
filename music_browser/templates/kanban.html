@@ -58,7 +58,10 @@ async function handleDrop(event, targetState) {
     try {
         const resp = await fetch(`/api/workflow/songs/${songId}/state`, {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': '{{ csrf_token }}'
+            },
             body: JSON.stringify({workflow_state: targetState})
         });
         if (resp.ok) location.reload();
@@ -74,7 +77,11 @@ document.querySelectorAll('form[data-state-form]').forEach(form => {
     sel.addEventListener('change', async () => {
         const data = new FormData(form);
         try {
-            const r = await fetch(form.action, { method: 'POST', body: new URLSearchParams(data) });
+            const r = await fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': '{{ csrf_token }}' },
+                body: new URLSearchParams(data)
+            });
             if (r.ok) {
                 // show a tiny toast instead of reloading
                 showToast('State updated ✓');

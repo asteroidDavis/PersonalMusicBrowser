@@ -1,12 +1,17 @@
 .idea/
 target/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 .env
+*.DS_Store
 
 *settings.py
 
 *__pycache__*
+
+music_browser/certs/
 
 # music_ara_client (JUCE ARA plugin, Phase 4)
 music_ara_client/build/
