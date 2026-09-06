@@ -166,6 +166,15 @@ Delete:      @request.auth.id != "" && created_by = @request.auth.id
 
 The starter rules are intentionally simple for local rollout. Before production, tighten group membership and group share mutations so only group owners/admins can manage membership and only resource admins can share resources.
 
+The `shares`, `groups`, `group_memberships`, and `group_shares` collections above are created automatically by `pb_migrations/1788724839_rebac_setup.js` the first time PocketBase starts against a data directory (no manual dashboard setup required); the field/rule tables here document what that migration creates.
+
+## Migrations
+
+`pb_migrations/` is applied automatically on `pocketbase serve` (and via `pocketbase migrate up`). It contains:
+
+- `1788724839_rebac_setup.js` — creates the ReBAC collections described above.
+- `1788730000_ci_test_seed.js` — seeds two known test users (`acl-test-user-1@example.com` / `acl-test-user-2@example.com`) used by `music_browser/tests/pocketbase_client_integration_tests.rs`. This is a no-op unless the `pocketbase` process has `PB_TEST_SEED=true` set, so it never runs against real dev/prod databases. See `music_browser/scripts/run-pocketbase-integration-tests.sh` for how CI and the pre-commit hook run PocketBase with this seed applied.
+
 ## Rust app configuration
 
 Copy `music_browser/.env.example` to `music_browser/.env` and set:

@@ -366,6 +366,11 @@ cd music_browser
 cargo test
 ```
 
+Note: `tests/pocketbase_client_integration_tests.rs` talks to a real PocketBase
+instance and is skipped (with a note) unless `POCKETBASE_TEST_URL` is set. See
+[PocketBase ACL Integration Tests](#pocketbase-acl-integration-tests) below to
+run the full suite, which is what CI and the pre-commit hook do.
+
 ### Run a Single Test (terminal)
 
 ```bash
@@ -379,6 +384,31 @@ cargo test test_song_crud -- --exact # exact match
 2. In `tests/db_tests.rs`, click the green ▶ gutter icon next to any `#[tokio::test]` function.
 3. Or right-click a test function → **Run 'test_name'**.
 4. To run all tests: open the terminal tab and run `cargo test`.
+
+### PocketBase ACL Integration Tests
+
+`tests/pocketbase_client_integration_tests.rs` exercises `pocketbase_client`
+and `permissions` against a real PocketBase server (shares, groups,
+group_memberships, group_shares) instead of mocks. Run the full suite,
+including these tests, with:
+
+```bash
+music_browser/scripts/run-pocketbase-integration-tests.sh
+```
+
+This script:
+1. Creates a throwaway PocketBase data directory.
+2. Applies `pocketbase/pb_migrations` into it, including the CI-only
+   `1788730000_ci_test_seed.js` migration (gated behind `PB_TEST_SEED=true`)
+   that seeds two known test users the integration tests authenticate as.
+3. Starts an ephemeral `pocketbase serve` on a free local port.
+4. Runs `cargo test` with `POCKETBASE_TEST_URL` pointed at it.
+5. Tears down the PocketBase process and temp directory on exit.
+
+It requires a `pocketbase` binary at `pocketbase/pocketbase` or on `PATH`
+(override with `POCKETBASE_BIN`). This is the same script CI
+(`.github/workflows/ci.yml`) and the pre-commit hook use, so `cargo test`
+locally and `git commit` exercise the same coverage.
 
 ### Test Coverage
 
@@ -405,6 +435,12 @@ The test suite covers:
 - Multi-section parsing
 - Empty row and empty input handling
 - Capitalize helper
+
+**PocketBase ACL integration tests** (`tests/pocketbase_client_integration_tests.rs` — 4 tests, requires a real PocketBase instance, see above):
+- Creating, listing, and deleting direct resource shares
+- Listing shares granted to a specific user
+- Group creation, group membership, and group-based resource sharing
+- `permissions` module access resolution (`require_access`, `require_edit_access`, `grant_creator_admin_share`) against real share records
 
 ## Pre-commit Hooks
 
@@ -442,12 +478,16 @@ music_browser/
 │   ├── 0001_initial.sql       # Initial schema (discography)
 │   └── 0002_merge_manual_model.sql  # Merged production model
 ├── scripts/
-│   └── install-hooks.sh       # Pre-commit hook installer
+│   ├── install-hooks.sh       # Pre-commit hook installer
+│   └── run-pocketbase-integration-tests.sh  # Spins up ephemeral PocketBase, runs cargo test
 ├── src/
 │   ├── lib.rs                 # Library crate (shared db module)
 │   ├── main.rs                # Launches database pool, jobs workflow, and webserver
 │   ├── app.rs                 # Starts webserver and connects to jobs queue and database pool
 │   ├── auth.rs                # JWT authentication middleware and handlers
+│   ├── acl.rs                 # ACL types: shares, groups, access levels, resource types
+│   ├── permissions.rs         # Access-check helpers built on PocketBase ACL data
+│   ├── pocketbase_client.rs   # HTTP client for PocketBase ACL collections
 │   ├── bulk_import.rs         # CLI: bulk import from markdown/SQLite
 │   └── db/
 │       ├── mod.rs             # Module declarations
@@ -471,7 +511,8 @@ music_browser/
 │   └── recordings.html        # Recording list
 └── tests/
     ├── db_tests.rs            # Database integration tests (29 tests)
-    └── auth_integration_tests.rs  # Auth integration tests
+    ├── auth_integration_tests.rs  # Auth integration tests
+    └── pocketbase_client_integration_tests.rs  # ACL integration tests (real PocketBase)
 ```
 
 ## Tech Stack
