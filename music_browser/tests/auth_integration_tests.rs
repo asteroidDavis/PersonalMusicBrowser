@@ -567,7 +567,10 @@ async fn auth_middleware_allows_public_auth_routes_and_redirects_protected_html(
             .wrap(csrf_middleware())
             .wrap(middleware::Condition::new(
                 true,
-                auth::JwtMiddleware::new(config.clone()),
+                auth::JwtMiddleware::new(
+                    config.clone(),
+                    web::Data::new(auth::TokenVerifyCache::default()),
+                ),
             ))
             .app_data(web::Data::new(config))
             .configure(app::configure_app),
