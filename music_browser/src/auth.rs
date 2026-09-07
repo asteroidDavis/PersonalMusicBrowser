@@ -101,9 +101,17 @@ const TOKEN_CACHE_MAX_ENTRIES: usize = 4096;
 /// tokens are never stored, and `invalidate` (called by `logout`) drops
 /// them immediately.
 pub struct TokenVerifyCache {
-    inner: Mutex<HashMap<[u8; 32], CachedVerification>>,
+    inner: Mutex<TokenVerifyCacheInner>,
     ttl: Duration,
     max_entries: usize,
+}
+
+#[derive(Default)]
+struct TokenVerifyCacheInner {
+    entries: HashMap<[u8; 32], CachedVerification>,
+    /// Monotonic counter so eviction order is deterministic even when
+    /// two stores land on the same `Instant` tick.
+    next_seq: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +120,7 @@ pub(crate) struct CachedVerification {
     /// The token PocketBase returned from auth-refresh (may be rotated).
     token: String,
     expires_at: Instant,
+    seq: u64,
 }
 
 impl Default for TokenVerifyCache {
@@ -123,7 +132,7 @@ impl Default for TokenVerifyCache {
 impl TokenVerifyCache {
     pub fn new(ttl: Duration, max_entries: usize) -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(TokenVerifyCacheInner::default()),
             ttl,
             max_entries,
         }
@@ -135,7 +144,7 @@ impl TokenVerifyCache {
         hasher.finish()
     }
 
-    fn lock(&self) -> MutexGuard<'_, HashMap<[u8; 32], CachedVerification>> {
+    fn lock(&self) -> MutexGuard<'_, TokenVerifyCacheInner> {
         self.inner.lock().unwrap_or_else(|err| err.into_inner())
     }
 
@@ -143,10 +152,10 @@ impl TokenVerifyCache {
     pub(crate) fn get(&self, token: &str) -> Option<CachedVerification> {
         let key = Self::hash(token);
         let mut inner = self.lock();
-        match inner.get(&key) {
+        match inner.entries.get(&key) {
             Some(entry) if entry.expires_at > Instant::now() => Some(entry.clone()),
             Some(_) => {
-                inner.remove(&key);
+                inner.entries.remove(&key);
                 None
             }
             None => None,
@@ -157,33 +166,38 @@ impl TokenVerifyCache {
     /// client sent; the rotated `verified.token` is registered too so
     /// follow-up requests presenting either hit the cache.
     pub(crate) fn store(&self, presented: &str, verified: &VerifiedToken) {
+        let mut inner = self.lock();
         let entry = CachedVerification {
             user_id: verified.user_id.clone(),
             token: verified.token.clone(),
             expires_at: Instant::now() + self.ttl,
+            seq: inner.next_seq,
         };
+        inner.next_seq += 1;
         let now = Instant::now();
-        let mut inner = self.lock();
-        inner.retain(|_, e| e.expires_at > now);
-        while inner.len() >= self.max_entries {
+        inner.entries.retain(|_, e| e.expires_at > now);
+        // Reserve room for both the presented and rotated keys.
+        let needed = 1 + usize::from(verified.token != presented);
+        while inner.entries.len() + needed > self.max_entries {
             let Some(oldest) = inner
+                .entries
                 .iter()
-                .min_by_key(|(_, e)| e.expires_at)
+                .min_by_key(|(_, e)| e.seq)
                 .map(|(k, _)| *k)
             else {
                 break;
             };
-            inner.remove(&oldest);
+            inner.entries.remove(&oldest);
         }
-        inner.insert(Self::hash(presented), entry.clone());
+        inner.entries.insert(Self::hash(presented), entry.clone());
         if verified.token != presented {
-            inner.insert(Self::hash(&verified.token), entry);
+            inner.entries.insert(Self::hash(&verified.token), entry);
         }
     }
 
     /// Drop any cached verification for `token` (e.g. on logout).
     pub(crate) fn invalidate(&self, token: &str) {
-        self.lock().remove(&Self::hash(token));
+        self.lock().entries.remove(&Self::hash(token));
     }
 }
 
@@ -913,12 +927,12 @@ mod tests {
     #[test]
     fn token_cache_evicts_oldest_at_capacity() {
         let cache = TokenVerifyCache::new(Duration::from_secs(60), 2);
-        cache.store("a", &verified("u", "a-t"));
-        std::thread::sleep(Duration::from_millis(1));
-        cache.store("b", &verified("u", "b-t"));
-        std::thread::sleep(Duration::from_millis(1));
-        // Capacity reached: the earliest-expiring entry is evicted.
-        cache.store("c", &verified("u", "c-t"));
+        // Non-rotating verifications (presented == returned) so each store
+        // occupies a single cache slot.
+        cache.store("a", &verified("u", "a"));
+        cache.store("b", &verified("u", "b"));
+        // Capacity reached: the oldest entry is evicted.
+        cache.store("c", &verified("u", "c"));
 
         assert!(cache.get("a").is_none());
         assert!(cache.get("b").is_some());
