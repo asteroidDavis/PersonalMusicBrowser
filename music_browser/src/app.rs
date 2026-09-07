@@ -777,10 +777,20 @@ pub async fn album_create(
 
 pub async fn album_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_album(&pool, path.into_inner())
+    let album_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Album,
+        album_id,
+    )
+    .await?;
+    queries::delete_album(&pool, album_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -878,10 +888,20 @@ pub async fn artist_create(
 
 pub async fn artist_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_artist(&pool, path.into_inner())
+    let artist_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Artist,
+        artist_id,
+    )
+    .await?;
+    queries::delete_artist(&pool, artist_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -959,10 +979,20 @@ pub async fn instrument_create(
 
 pub async fn instrument_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_instrument(&pool, path.into_inner())
+    let instrument_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Instrument,
+        instrument_id,
+    )
+    .await?;
+    queries::delete_instrument(&pool, instrument_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -1020,10 +1050,20 @@ pub async fn recording_list(
 
 pub async fn recording_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_recording(&pool, path.into_inner())
+    let recording_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::Recording,
+        recording_id,
+    )
+    .await?;
+    queries::delete_recording(&pool, recording_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -1092,10 +1132,15 @@ pub async fn band_create(
 
 pub async fn band_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_band(&pool, path.into_inner())
+    let band_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Band, band_id)
+        .await?;
+    queries::delete_band(&pool, band_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -1742,10 +1787,20 @@ pub async fn exercise_create(
 
 pub async fn exercise_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_exercise(&pool, path.into_inner())
+    let exercise_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::PracticeExercise,
+        exercise_id,
+    )
+    .await?;
+    queries::delete_exercise(&pool, exercise_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()

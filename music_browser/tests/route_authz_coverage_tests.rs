@@ -241,7 +241,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("albums"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Artists ---
@@ -261,7 +261,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("artists"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Instruments ---
@@ -281,7 +281,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("instruments"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Recordings ---
@@ -293,7 +293,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("recordings"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Bands ---
@@ -313,7 +313,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("bands"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Production: child resources cascade to the parent song's ACL ---
@@ -483,7 +483,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("practice_exercises"),
-            open_until: Some("PR 5"),
+            open_until: None,
         },
     },
     // --- Goals ---
