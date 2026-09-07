@@ -2228,6 +2228,18 @@ pub async fn add_song_to_set(
     Ok(result.last_insert_rowid())
 }
 
+/// The owning `live_sets` id for a `live_set_songs` join row, used by
+/// handlers that receive the join row id but authorize on the parent set.
+pub async fn live_set_id_for_join_row(
+    pool: &SqlitePool,
+    join_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT set_id FROM live_set_songs WHERE id = ?")
+        .bind(join_id)
+        .fetch_optional(pool)
+        .await
+}
+
 pub async fn remove_song_from_set(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM live_set_songs WHERE id = ?")
         .bind(id)
