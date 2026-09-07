@@ -1,5 +1,5 @@
 use crate::acl::{
-    CreateGroup, CreateGroupMember, CreateGroupShare, CreateShare, GroupMember, Share,
+    CreateGroup, CreateGroupMember, CreateGroupShare, CreateShare, GroupMember, GroupShare, Share,
 };
 use crate::auth::AuthConfig;
 use reqwest::StatusCode;
@@ -140,6 +140,28 @@ impl PocketBaseClient {
     ) -> Result<Vec<GroupMember>, PocketBaseClientError> {
         let filter = format!("group_id = '{}'", escape_filter_value(group_id));
         self.list_records(token, "group_memberships", &filter).await
+    }
+
+    /// All group memberships for a user (the PocketBase list rule already
+    /// restricts results to `user_id = auth`, so this returns exactly the
+    /// caller's own memberships).
+    pub async fn list_user_group_memberships(
+        &self,
+        token: &str,
+        user_id: &str,
+    ) -> Result<Vec<GroupMember>, PocketBaseClientError> {
+        let filter = format!("user_id = '{}'", escape_filter_value(user_id));
+        self.list_records(token, "group_memberships", &filter).await
+    }
+
+    /// All resources shared with a group.
+    pub async fn list_group_shares(
+        &self,
+        token: &str,
+        group_id: &str,
+    ) -> Result<Vec<GroupShare>, PocketBaseClientError> {
+        let filter = format!("group_id = '{}'", escape_filter_value(group_id));
+        self.list_records(token, "group_shares", &filter).await
     }
 
     pub async fn share_with_group(
