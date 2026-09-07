@@ -1650,11 +1650,15 @@ pub struct WorkflowUpdateForm {
 
 pub async fn workflow_update(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<WorkflowUpdateForm>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let state = WorkflowState::parse(&form.0.workflow_state)
         .ok_or_else(|| actix_web::error::ErrorBadRequest("Invalid workflow state"))?;
     queries::update_workflow_state(&pool, song_id, &state)
@@ -1668,11 +1672,15 @@ pub async fn workflow_update(
 // JSON endpoint for drag-and-drop
 pub async fn workflow_update_json(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     body: web::Json<WorkflowUpdateForm>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let state = WorkflowState::parse(&body.workflow_state)
         .ok_or_else(|| actix_web::error::ErrorBadRequest("Invalid workflow state"))?;
     queries::update_workflow_state(&pool, song_id, &state)
@@ -1899,10 +1907,15 @@ pub async fn goal_create(
 
 pub async fn goal_toggle(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::toggle_goal(&pool, path.into_inner())
+    let goal_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Goal, goal_id)
+        .await?;
+    queries::toggle_goal(&pool, goal_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -1912,10 +1925,15 @@ pub async fn goal_toggle(
 
 pub async fn goal_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_goal(&pool, path.into_inner())
+    let goal_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Goal, goal_id)
+        .await?;
+    queries::delete_goal(&pool, goal_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -2287,10 +2305,20 @@ pub async fn set_create(
 
 pub async fn set_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_live_set(&pool, path.into_inner())
+    let set_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::LiveSet,
+        set_id,
+    )
+    .await?;
+    queries::delete_live_set(&pool, set_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -2300,13 +2328,23 @@ pub async fn set_delete(
 
 pub async fn set_add_song(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<SetSongFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
+    let set_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::LiveSet,
+        set_id,
+    )
+    .await?;
     let input = CreateLiveSetSong {
-        set_id: path.into_inner(),
+        set_id,
         song_id: form.song_id,
         sort_order: form.sort_order,
         backing_track_path: form.backing_track_path,
@@ -2323,10 +2361,25 @@ pub async fn set_add_song(
 
 pub async fn set_remove_song(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::remove_song_from_set(&pool, path.into_inner())
+    let join_id = path.into_inner();
+    // The path id names a join row; authorize on the parent live set.
+    let set_id = queries::live_set_id_for_join_row(&pool, join_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or(permissions::PermissionError::NotFound)?;
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::LiveSet,
+        set_id,
+    )
+    .await?;
+    queries::remove_song_from_set(&pool, join_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -2336,12 +2389,17 @@ pub async fn set_remove_song(
 
 pub async fn practice_priority_update(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<PriorityFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    let song_id = path.into_inner();
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let priority = form.0.priority.clamp(0, 5);
-    queries::update_practice_priority(&pool, path.into_inner(), priority)
+    queries::update_practice_priority(&pool, song_id, priority)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())

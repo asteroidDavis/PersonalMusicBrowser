@@ -449,7 +449,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "songs",
                 conditions: &[("id", "{id}"), ("workflow_state", "learning")],
             },
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -463,7 +463,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "songs",
                 conditions: &[("id", "{id}"), ("workflow_state", "learning")],
             },
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     // --- Exercises ---
@@ -506,7 +506,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "goals",
                 conditions: &[("id", "{id}"), ("completed", "1")],
             },
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -517,7 +517,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("goals"),
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     // --- Profile / journal / schedule: global single-tenant state ---
@@ -610,7 +610,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("live_sets"),
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -624,7 +624,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "live_set_songs",
                 conditions: &[("set_id", "{id}"), ("song_id", "{other}")],
             },
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -635,7 +635,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("live_set_songs"),
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     // --- Practice priority (song-scoped mutation) ---
@@ -650,7 +650,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "songs",
                 conditions: &[("id", "{id}"), ("practice_priority", "3")],
             },
-            open_until: Some("PR 6"),
+            open_until: None,
         },
     },
     // --- Workflow jobs API ---
