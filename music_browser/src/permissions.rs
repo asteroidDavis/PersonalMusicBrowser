@@ -2,12 +2,12 @@ use actix_web::HttpMessage;
 use actix_web::{http::StatusCode, web, HttpRequest, HttpResponse, ResponseError};
 use log::{info, warn};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::acl::{AccessLevel, CreateShare, ResourceType, Share};
+use crate::acl::{AccessLevel, CreateShare, GroupMember, GroupShare, ResourceType, Share};
 use crate::auth::{AuthConfig, AuthenticatedUser};
 use crate::pocketbase_client::{PocketBaseClient, PocketBaseClientError};
 
@@ -209,6 +209,58 @@ pub async fn require_edit_access_or_401(
     }
 }
 
+/// Resolve which `resource_type` ids the request may see in a list view.
+///
+/// Returns `Some(ids)` when the response must be filtered to `ids`, `None`
+/// when list filtering is disabled for this deployment (no authenticated
+/// user in single-tenant mode, no `PocketBaseClient`, or missing ACL
+/// collections — all warned/skipped like the mutate-path helpers). When
+/// login is required but no user is present it fails closed with
+/// `NotAuthenticated`.
+pub async fn list_visibility(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    resource_type: ResourceType,
+) -> Result<Option<Rc<HashSet<i64>>>, PermissionError> {
+    let Some(user) = authenticated_user(req) else {
+        return if login_required(req) {
+            Err(PermissionError::NotAuthenticated)
+        } else {
+            Ok(None)
+        };
+    };
+    let Some(pocketbase) = pocketbase.map(|d| d.get_ref()) else {
+        warn!(
+            "[ACL_LIST_SKIPPED] PocketBase client missing for resource_type={} user_id={}",
+            resource_type, user.id
+        );
+        return Ok(None);
+    };
+    match accessible_resource_ids(req, pocketbase, &user, resource_type).await {
+        Ok(ids) => Ok(Some(ids)),
+        Err(PermissionError::MissingAclCollections) => {
+            warn!(
+                "[ACL_LIST_SKIPPED] PocketBase ACL collections missing for resource_type={} user_id={}",
+                resource_type, user.id
+            );
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Retain only rows whose `id` is in `visible`, when `visible` is
+/// `Some`. `None` means list filtering is disabled — keep everything.
+pub fn retain_visible<T>(
+    visible: &Option<Rc<HashSet<i64>>>,
+    items: &mut Vec<T>,
+    id_of: impl Fn(&T) -> i64,
+) {
+    if let Some(ids) = visible {
+        items.retain(|item| ids.contains(&id_of(item)));
+    }
+}
+
 /// Grant the request's `AuthenticatedUser` a creator `admin` share on a
 /// freshly created resource. Best-effort bookkeeping: skips silently (with a
 /// warning) when there is no authenticated user, no `PocketBaseClient`, or no
@@ -268,6 +320,12 @@ struct RequestAclCacheInner {
     resource_shares: HashMap<(ResourceType, i64), Rc<Vec<Share>>>,
     /// All `shares` rows granted to a user, keyed by user id.
     user_shares: HashMap<String, Rc<Vec<Share>>>,
+    /// `group_memberships` rows for a user, keyed by user id.
+    group_memberships: HashMap<String, Rc<Vec<GroupMember>>>,
+    /// `group_shares` rows for a group, keyed by group id.
+    group_shares: HashMap<String, Rc<Vec<GroupShare>>>,
+    /// Resolved accessible id sets, keyed by (user id, resource_type).
+    accessible: HashMap<(String, ResourceType), Rc<HashSet<i64>>>,
 }
 
 fn request_acl_cache(req: &HttpRequest) -> RequestAclCache {
@@ -340,6 +398,104 @@ pub async fn user_shares_cached(
         .user_shares
         .insert(user.id.clone(), Rc::clone(&shares));
     Ok(shares)
+}
+
+/// `list_user_group_memberships` memoized for the lifetime of `req`.
+pub async fn user_group_memberships_cached(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+) -> Result<Rc<Vec<GroupMember>>, PermissionError> {
+    let cache = request_acl_cache(req);
+    if let Some(memberships) = cache.inner.borrow().group_memberships.get(&user.id) {
+        return Ok(Rc::clone(memberships));
+    }
+    let memberships = Rc::new(
+        pb_client
+            .list_user_group_memberships(&user.token, &user.id)
+            .await
+            .map_err(|err| permission_backend_error(err, "user_group_memberships_cached"))?,
+    );
+    cache
+        .inner
+        .borrow_mut()
+        .group_memberships
+        .insert(user.id.clone(), Rc::clone(&memberships));
+    Ok(memberships)
+}
+
+/// `list_group_shares` memoized for the lifetime of `req`.
+pub async fn group_shares_cached(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+    group_id: &str,
+) -> Result<Rc<Vec<GroupShare>>, PermissionError> {
+    let cache = request_acl_cache(req);
+    if let Some(shares) = cache.inner.borrow().group_shares.get(group_id) {
+        return Ok(Rc::clone(shares));
+    }
+    let shares = Rc::new(
+        pb_client
+            .list_group_shares(&user.token, group_id)
+            .await
+            .map_err(|err| permission_backend_error(err, "group_shares_cached"))?,
+    );
+    cache
+        .inner
+        .borrow_mut()
+        .group_shares
+        .insert(group_id.to_string(), Rc::clone(&shares));
+    Ok(shares)
+}
+
+/// Every resource id of `resource_type` the user can access: their direct
+/// `shares` unioned with `group_shares` of every group they belong to.
+/// The result is memoized for the request's lifetime.
+pub async fn accessible_resource_ids(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+    resource_type: ResourceType,
+) -> Result<Rc<HashSet<i64>>, PermissionError> {
+    let cache = request_acl_cache(req);
+    let key = (user.id.clone(), resource_type);
+    if let Some(ids) = cache.inner.borrow().accessible.get(&key) {
+        return Ok(Rc::clone(ids));
+    }
+
+    let mut ids = HashSet::new();
+    for share in user_shares_cached(req, pb_client, user).await?.iter() {
+        if share.resource_type == resource_type.as_str() {
+            if let Ok(id) = share.resource_id.parse::<i64>() {
+                ids.insert(id);
+            }
+        }
+    }
+
+    for membership in user_group_memberships_cached(req, pb_client, user)
+        .await?
+        .iter()
+    {
+        for group_share in group_shares_cached(req, pb_client, user, &membership.group_id)
+            .await?
+            .iter()
+        {
+            if group_share.resource_type == resource_type.as_str() {
+                if let Ok(id) = group_share.resource_id.parse::<i64>() {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+
+    let ids = Rc::new(ids);
+    cache
+        .inner
+        .borrow_mut()
+        .accessible
+        .insert(key, Rc::clone(&ids));
+    Ok(ids)
 }
 
 /// `check_user_access` against the request's memoized ACL cache.

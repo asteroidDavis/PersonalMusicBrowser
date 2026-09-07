@@ -162,3 +162,13 @@ pub struct CreateGroupShare {
     pub access_level: AccessLevel,
     pub created_by: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GroupShare {
+    pub id: String,
+    pub group_id: String,
+    pub resource_type: String,
+    pub resource_id: String,
+    pub access_level: AccessLevel,
+    pub created_by: String,
+}
