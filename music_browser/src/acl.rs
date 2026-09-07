@@ -77,6 +77,31 @@ impl ResourceType {
             ResourceType::Job => "job",
         }
     }
+
+    /// Parse the `as_str` form back into a `ResourceType`.
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            ResourceType::Instrument,
+            ResourceType::Band,
+            ResourceType::Artist,
+            ResourceType::Album,
+            ResourceType::Song,
+            ResourceType::Recording,
+            ResourceType::Device,
+            ResourceType::DevicePreset,
+            ResourceType::SongInstrument,
+            ResourceType::ProductionStage,
+            ResourceType::ProductionStep,
+            ResourceType::SongFile,
+            ResourceType::Sample,
+            ResourceType::PracticeExercise,
+            ResourceType::Goal,
+            ResourceType::LiveSet,
+            ResourceType::Job,
+        ]
+        .into_iter()
+        .find(|rt| rt.as_str() == s)
+    }
 }
 
 impl fmt::Display for ResourceType {
@@ -136,6 +161,11 @@ impl GroupRole {
             GroupRole::Member => "member",
             GroupRole::Viewer => "viewer",
         }
+    }
+
+    /// Whether the role may manage the group (members, shares).
+    pub fn can_manage(self) -> bool {
+        matches!(self, GroupRole::Owner | GroupRole::Admin)
     }
 }
 

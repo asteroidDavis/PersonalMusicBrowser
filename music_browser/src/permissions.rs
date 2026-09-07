@@ -177,6 +177,42 @@ pub async fn require_edit_access_or_401(
     resource_type: ResourceType,
     resource_id: i64,
 ) -> Result<(), PermissionError> {
+    require_access_level_or_401(
+        req,
+        pocketbase,
+        resource_type,
+        resource_id,
+        AccessLevel::Editor,
+    )
+    .await
+}
+
+/// Require `admin` access on `(resource_type, resource_id)` — used by
+/// share-management endpoints where granting access is itself privileged.
+/// Same skip/fail-closed semantics as `require_edit_access_or_401`.
+pub async fn require_admin_access_or_401(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    resource_type: ResourceType,
+    resource_id: i64,
+) -> Result<(), PermissionError> {
+    require_access_level_or_401(
+        req,
+        pocketbase,
+        resource_type,
+        resource_id,
+        AccessLevel::Admin,
+    )
+    .await
+}
+
+async fn require_access_level_or_401(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    resource_type: ResourceType,
+    resource_id: i64,
+    required: AccessLevel,
+) -> Result<(), PermissionError> {
     let Some(user) = authenticated_user(req) else {
         return if login_required(req) {
             Err(PermissionError::NotAuthenticated)
@@ -193,9 +229,15 @@ pub async fn require_edit_access_or_401(
         );
         return Ok(());
     };
-    match check_user_access_cached(req, pocketbase, &user, resource_type, resource_id).await {
-        Ok(Some(access)) if access.access_level.can_edit() => Ok(()),
-        Ok(_) => Err(PermissionError::NotFound),
+    let allowed = match check_user_access_cached(req, pocketbase, &user, resource_type, resource_id)
+        .await
+    {
+        Ok(Some(access)) => match required {
+            AccessLevel::Admin => access.access_level.can_admin(),
+            AccessLevel::Editor => access.access_level.can_edit(),
+            AccessLevel::Viewer => true,
+        },
+        Ok(None) => false,
         Err(PermissionError::MissingAclCollections) => {
             warn!(
                 "[ACL_CHECK_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
@@ -203,10 +245,77 @@ pub async fn require_edit_access_or_401(
                 resource_id,
                 user.id
             );
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(PermissionError::NotFound)
+    }
+}
+
+/// Require the request's `AuthenticatedUser` to be able to manage the given
+/// `groups` record: either `owner_id` on the group, or an `owner`/`admin`
+/// membership row. `NotFound` when the group doesn't exist or the user has
+/// no manage rights. Same skip semantics as the resource helpers.
+pub async fn require_group_manage_or_404(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    group_id: &str,
+) -> Result<(), PermissionError> {
+    let Some(user) = authenticated_user(req) else {
+        return if login_required(req) {
+            Err(PermissionError::NotAuthenticated)
+        } else {
+            Ok(())
+        };
+    };
+    let Some(pocketbase) = pocketbase.map(|d| d.get_ref()) else {
+        warn!(
+            "[ACL_CHECK_SKIPPED] PocketBase client missing for group_id={} user_id={}",
+            group_id, user.id
+        );
+        return Ok(());
+    };
+
+    match user_can_manage_group(req, pocketbase, &user, group_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(PermissionError::NotFound),
+        Err(PermissionError::MissingAclCollections) => {
+            warn!(
+                "[ACL_CHECK_SKIPPED] PocketBase ACL collections missing for group_id={} user_id={}",
+                group_id, user.id
+            );
             Ok(())
         }
         Err(err) => Err(err),
     }
+}
+
+/// Whether `user` may manage `group_id`: `owner_id` on the group record, or
+/// an `owner`/`admin` membership. `NotFound` when the group record itself
+/// does not resolve.
+pub async fn user_can_manage_group(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+    group_id: &str,
+) -> Result<bool, PermissionError> {
+    match pb_client.get_group(&user.token, group_id).await {
+        Ok(group) if group.owner_id == user.id => return Ok(true),
+        Ok(_) => {}
+        Err(err) if err.is_missing_collection() => {
+            return Err(permission_backend_error(err, "user_can_manage_group"));
+        }
+        Err(err) if err.is_not_found() => return Err(PermissionError::NotFound),
+        Err(err) => return Err(permission_backend_error(err, "user_can_manage_group")),
+    }
+    Ok(user_group_memberships_cached(req, pb_client, user)
+        .await?
+        .iter()
+        .any(|m| m.group_id == group_id && m.role.can_manage()))
 }
 
 /// Resolve which `resource_type` ids the request may see in a list view.
