@@ -25,6 +25,7 @@
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
 use actix_web::http::header;
@@ -156,7 +157,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: JSON,
             body: r#"{"user_id":"{b}","resource_type":"song","resource_id":"{id}","access_level":"viewer"}"#,
             mutated: Mutation::ShareVisibleToB,
-            open_until: Some("PR 4 (share_create ownership check)"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -175,7 +176,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: JSON,
             body: r#"{"user_id":"{b}","role":"member"}"#,
             mutated: Mutation::GroupMembershipForB,
-            open_until: Some("PR 4 (group owner check)"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -186,7 +187,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: JSON,
             body: r#"{"resource_type":"song","resource_id":"{other}","access_level":"viewer"}"#,
             mutated: Mutation::GroupShareExists,
-            open_until: Some("PR 4 (group owner + resource admin check)"),
+            open_until: None,
         },
     },
     // --- Songs ---
@@ -848,7 +849,33 @@ struct Harness {
     user_a: TestUser,
     user_b: TestUser,
     csrf: CsrfSession,
+    /// Allocates explicit row ids for seed inserts.
+    id_cursor: AtomicI64,
 }
+
+impl Harness {
+    /// A row id guaranteed unique across all harnesses in this test binary.
+    ///
+    /// PocketBase state is shared process-wide while each harness gets a
+    /// fresh SQLite database whose rowids restart at 1. Without explicit
+    /// high ids, a `shares` row created by one test (e.g. a `Creates`
+    /// route granting the caller an `admin` share on its fresh `songs`
+    /// rowid) aliases a same-numbered fixture row in another harness and
+    /// leaks access across tests.
+    ///
+    /// The cursor counts DOWN from the window's top: explicit seed ids push
+    /// `AUTOINCREMENT` tables' rowid counter to the highest seen id, so rows
+    /// the app itself inserts land above the cursor while descending seeds
+    /// stay clear of them.
+    fn next_id(&self) -> i64 {
+        self.id_cursor.fetch_sub(1, Ordering::Relaxed)
+    }
+}
+
+// Each harness in this binary gets its own 100k-id window in a range no
+// other test file touches.
+static HARNESS_COUNTER: AtomicI64 = AtomicI64::new(0);
+const HARNESS_ID_BASE: i64 = 8_000_000_000;
 
 async fn start_harness(pb_url: &str) -> (Harness, NamedTempFile) {
     let (pool, tmp) = test_pool().await;
@@ -905,6 +932,11 @@ async fn start_harness(pb_url: &str) -> (Harness, NamedTempFile) {
             user_a,
             user_b,
             csrf,
+            id_cursor: AtomicI64::new(
+                HARNESS_ID_BASE
+                    + HARNESS_COUNTER.fetch_add(1, Ordering::Relaxed) * 100_000
+                    + 100_000,
+            ),
         },
         tmp,
     )
@@ -1039,10 +1071,11 @@ async fn grant_admin(h: &Harness, rt: ResourceType, id: i64) {
 }
 
 async fn seed_owned_song(h: &Harness) -> i64 {
-    let id = insert_row(
+    let id = h.next_id();
+    insert_row(
         &h.pool,
-        "INSERT INTO songs (title) VALUES ('owned-song')",
-        &[],
+        "INSERT INTO songs (id, title) VALUES (?, 'owned-song')",
+        &[id],
     )
     .await;
     grant_admin(h, ResourceType::Song, id).await;
@@ -1062,57 +1095,60 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
                 ResourceType::Album => {
                     insert_row(
                         &h.pool,
-                        "INSERT INTO albums (title, released, url) VALUES ('a', 0, '')",
-                        &[],
+                        "INSERT INTO albums (id, title, released, url) VALUES (?, 'a', 0, '')",
+                        &[h.next_id()],
                     )
                     .await
                 }
                 ResourceType::Artist => {
-                    insert_row(&h.pool, "INSERT INTO artists (name) VALUES ('a')", &[]).await
+                    insert_row(&h.pool, "INSERT INTO artists (id, name) VALUES (?, 'a')", &[h.next_id()])
+                        .await
                 }
                 ResourceType::Instrument => {
                     insert_row(
                         &h.pool,
-                        "INSERT INTO instruments (name, instrument_type) VALUES ('a', 'guitar')",
-                        &[],
+                        "INSERT INTO instruments (id, name, instrument_type) VALUES (?, 'a', 'guitar')",
+                        &[h.next_id()],
                     )
                     .await
                 }
                 ResourceType::Recording => {
                     let song = insert_row(
                         &h.pool,
-                        "INSERT INTO songs (title) VALUES ('carrier')",
-                        &[],
+                        "INSERT INTO songs (id, title) VALUES (?, 'carrier')",
+                        &[h.next_id()],
                     )
                     .await;
                     insert_row(
                         &h.pool,
-                        "INSERT INTO recordings (recording_type, path, song_id) VALUES ('wav', '/tmp/x', ?)",
-                        &[song],
+                        "INSERT INTO recordings (id, recording_type, path, song_id) VALUES (?, 'wav', '/tmp/x', ?)",
+                        &[h.next_id(), song],
                     )
                     .await
                 }
                 ResourceType::Band => {
-                    insert_row(&h.pool, "INSERT INTO bands (name) VALUES ('b')", &[]).await
+                    insert_row(&h.pool, "INSERT INTO bands (id, name) VALUES (?, 'b')", &[h.next_id()])
+                        .await
                 }
                 ResourceType::PracticeExercise => {
                     insert_row(
                         &h.pool,
-                        "INSERT INTO practice_exercises (name, category) VALUES ('x', 'technique')",
-                        &[],
+                        "INSERT INTO practice_exercises (id, name, category) VALUES (?, 'x', 'technique')",
+                        &[h.next_id()],
                     )
                     .await
                 }
                 ResourceType::Goal => {
                     insert_row(
                         &h.pool,
-                        "INSERT INTO goals (horizon, category, title) VALUES ('1_week', 'general', 'g')",
-                        &[],
+                        "INSERT INTO goals (id, horizon, category, title) VALUES (?, '1_week', 'general', 'g')",
+                        &[h.next_id()],
                     )
                     .await
                 }
                 ResourceType::LiveSet => {
-                    insert_row(&h.pool, "INSERT INTO live_sets (name) VALUES ('s')", &[]).await
+                    insert_row(&h.pool, "INSERT INTO live_sets (id, name) VALUES (?, 's')", &[h.next_id()])
+                        .await
                 }
                 other => panic!("no seed recipe for ResourceType::{other:?}"),
             };
@@ -1126,12 +1162,17 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             }
         }
         Seed::OwnedSetWithSong => {
-            let set = insert_row(&h.pool, "INSERT INTO live_sets (name) VALUES ('s')", &[]).await;
+            let set = insert_row(
+                &h.pool,
+                "INSERT INTO live_sets (id, name) VALUES (?, 's')",
+                &[h.next_id()],
+            )
+            .await;
             grant_admin(h, ResourceType::LiveSet, set).await;
             let song = insert_row(
                 &h.pool,
-                "INSERT INTO songs (title) VALUES ('set-candidate')",
-                &[],
+                "INSERT INTO songs (id, title) VALUES (?, 'set-candidate')",
+                &[h.next_id()],
             )
             .await;
             Fixture {
@@ -1141,18 +1182,23 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             }
         }
         Seed::JoinUnderOwnedSet => {
-            let set = insert_row(&h.pool, "INSERT INTO live_sets (name) VALUES ('s')", &[]).await;
+            let set = insert_row(
+                &h.pool,
+                "INSERT INTO live_sets (id, name) VALUES (?, 's')",
+                &[h.next_id()],
+            )
+            .await;
             grant_admin(h, ResourceType::LiveSet, set).await;
             let song = insert_row(
                 &h.pool,
-                "INSERT INTO songs (title) VALUES ('set-member')",
-                &[],
+                "INSERT INTO songs (id, title) VALUES (?, 'set-member')",
+                &[h.next_id()],
             )
             .await;
             let join = insert_row(
                 &h.pool,
-                "INSERT INTO live_set_songs (set_id, song_id) VALUES (?, ?)",
-                &[set, song],
+                "INSERT INTO live_set_songs (id, set_id, song_id) VALUES (?, ?, ?)",
+                &[h.next_id(), set, song],
             )
             .await;
             Fixture {
@@ -1165,8 +1211,8 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             let song = seed_owned_song(h).await;
             let stage = insert_row(
                 &h.pool,
-                "INSERT INTO production_stages (song_id, stage, status) VALUES (?, 'writing', 'not_started')",
-                &[song],
+                "INSERT INTO production_stages (id, song_id, stage, status) VALUES (?, ?, 'writing', 'not_started')",
+                &[h.next_id(), song],
             )
             .await;
             Fixture {
@@ -1179,14 +1225,14 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             let song = seed_owned_song(h).await;
             let stage = insert_row(
                 &h.pool,
-                "INSERT INTO production_stages (song_id, stage, status) VALUES (?, 'writing', 'not_started')",
-                &[song],
+                "INSERT INTO production_stages (id, song_id, stage, status) VALUES (?, ?, 'writing', 'not_started')",
+                &[h.next_id(), song],
             )
             .await;
             let step = insert_row(
                 &h.pool,
-                "INSERT INTO production_steps (stage_id, name) VALUES (?, 'x')",
-                &[stage],
+                "INSERT INTO production_steps (id, stage_id, name) VALUES (?, ?, 'x')",
+                &[h.next_id(), stage],
             )
             .await;
             Fixture {
@@ -1199,8 +1245,8 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             let song = seed_owned_song(h).await;
             let file = insert_row(
                 &h.pool,
-                "INSERT INTO song_files (song_id, file_type, path) VALUES (?, 'lyrics', '/tmp/x')",
-                &[song],
+                "INSERT INTO song_files (id, song_id, file_type, path) VALUES (?, ?, 'lyrics', '/tmp/x')",
+                &[h.next_id(), song],
             )
             .await;
             Fixture {
@@ -1229,14 +1275,14 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
         Seed::JournalEntry => {
             let goal = insert_row(
                 &h.pool,
-                "INSERT INTO goals (horizon, category, title) VALUES ('1_week', 'general', 'carrier')",
-                &[],
+                "INSERT INTO goals (id, horizon, category, title) VALUES (?, '1_week', 'general', 'carrier')",
+                &[h.next_id()],
             )
             .await;
             let entry = insert_row(
                 &h.pool,
-                "INSERT INTO journal_entries (entry_date, entry_type, goal_id) VALUES ('2030-01-01', 'goal', ?)",
-                &[goal],
+                "INSERT INTO journal_entries (id, entry_date, entry_type, goal_id) VALUES (?, '2030-01-01', 'goal', ?)",
+                &[h.next_id(), goal],
             )
             .await;
             Fixture {
@@ -1248,14 +1294,14 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
         Seed::ScheduleItem => {
             let event = insert_row(
                 &h.pool,
-                "INSERT INTO schedule_events (event_date, title) VALUES ('2030-01-06', 'e')",
-                &[],
+                "INSERT INTO schedule_events (id, event_date, title) VALUES (?, '2030-01-06', 'e')",
+                &[h.next_id()],
             )
             .await;
             let item = insert_row(
                 &h.pool,
-                "INSERT INTO schedule_items (event_id, item_type, title) VALUES (?, 'warmup', 'w')",
-                &[event],
+                "INSERT INTO schedule_items (id, event_id, item_type, title) VALUES (?, ?, 'warmup', 'w')",
+                &[h.next_id(), event],
             )
             .await;
             Fixture {
@@ -1267,8 +1313,8 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
         Seed::ScheduleEvent => {
             let event = insert_row(
                 &h.pool,
-                "INSERT INTO schedule_events (event_date, title) VALUES ('2030-01-06', 'e')",
-                &[],
+                "INSERT INTO schedule_events (id, event_date, title) VALUES (?, '2030-01-06', 'e')",
+                &[h.next_id()],
             )
             .await;
             Fixture {
