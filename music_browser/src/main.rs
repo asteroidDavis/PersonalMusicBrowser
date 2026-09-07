@@ -67,6 +67,7 @@ async fn main() -> std::io::Result<()> {
         );
     }
 
+    let token_cache_data = web::Data::new(auth::TokenVerifyCache::default());
     let (job_queue, job_receiver) = JobQueue::new(256);
     let job_store = job_queue.store.clone();
     tokio::spawn(run_worker(job_receiver, job_store.clone()));
@@ -88,9 +89,10 @@ async fn main() -> std::io::Result<()> {
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
             .app_data(csrf_config.clone())
+            .app_data(token_cache_data.clone())
             .wrap(middleware::Condition::new(
                 request_auth,
-                auth::JwtMiddleware::new(auth_config.clone()),
+                auth::JwtMiddleware::new(auth_config.clone(), token_cache_data.clone()),
             ))
             .wrap(CsrfMiddleware::new(csrf_config.clone()))
             .configure(app::configure_app)
