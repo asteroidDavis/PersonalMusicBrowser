@@ -33,74 +33,6 @@ pub fn redirect_back(req: &HttpRequest, default: &str) -> HttpResponse {
         .finish()
 }
 
-async fn grant_creator_admin_share_if_authenticated(
-    req: &HttpRequest,
-    pocketbase: Option<&web::Data<PocketBaseClient>>,
-    resource_type: ResourceType,
-    resource_id: i64,
-) -> actix_web::Result<()> {
-    let Some(user) = permissions::authenticated_user(req) else {
-        return Ok(());
-    };
-    let Some(pocketbase) = pocketbase else {
-        log::warn!(
-            "[ACL_SHARE_SKIPPED] PocketBase client missing for resource_type={} resource_id={} user_id={}",
-            resource_type,
-            resource_id,
-            user.id
-        );
-        return Ok(());
-    };
-    match permissions::grant_creator_admin_share(pocketbase, &user, resource_type, resource_id)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(permissions::PermissionError::MissingAclCollections) => {
-            log::warn!(
-                "[ACL_SHARE_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
-                resource_type,
-                resource_id,
-                user.id
-            );
-            Ok(())
-        }
-        Err(err) => Err(actix_web::Error::from(err)),
-    }
-}
-
-async fn require_edit_access_if_authenticated(
-    req: &HttpRequest,
-    pocketbase: Option<&web::Data<PocketBaseClient>>,
-    resource_type: ResourceType,
-    resource_id: i64,
-) -> actix_web::Result<()> {
-    let Some(user) = permissions::authenticated_user(req) else {
-        return Ok(());
-    };
-    let Some(pocketbase) = pocketbase else {
-        log::warn!(
-            "[ACL_CHECK_SKIPPED] PocketBase client missing for resource_type={} resource_id={} user_id={}",
-            resource_type,
-            resource_id,
-            user.id
-        );
-        return Ok(());
-    };
-    match permissions::require_edit_access(pocketbase, &user, resource_type, resource_id).await {
-        Ok(_) => Ok(()),
-        Err(permissions::PermissionError::MissingAclCollections) => {
-            log::warn!(
-                "[ACL_CHECK_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
-                resource_type,
-                resource_id,
-                user.id
-            );
-            Ok(())
-        }
-        Err(err) => Err(actix_web::Error::from(err)),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // QsForm: a form extractor that uses serde_qs instead of serde_urlencoded.
 // This correctly handles repeated keys (checkbox arrays) and treats empty
@@ -636,7 +568,7 @@ pub async fn song_create(
     let song_id = queries::create_song(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Song,
@@ -657,7 +589,8 @@ pub async fn song_edit(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, id).await?;
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, id)
+        .await?;
     let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, id)
         .await
@@ -715,7 +648,7 @@ pub async fn song_update(
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     let existing = queries::get_song(&pool, song_id)
         .await
@@ -764,7 +697,7 @@ pub async fn song_delete(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     queries::delete_song(&pool, song_id)
         .await
@@ -821,7 +754,7 @@ pub async fn album_create(
     let album_id = queries::create_album(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Album,
@@ -917,7 +850,7 @@ pub async fn artist_create(
     let artist_id = queries::create_artist(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Artist,
@@ -993,7 +926,7 @@ pub async fn instrument_create(
     let instrument_id = queries::create_instrument(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Instrument,
@@ -1116,7 +1049,7 @@ pub async fn band_create(
     let band_id = queries::create_band(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Band,
@@ -1230,7 +1163,7 @@ pub async fn stage_new(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     let song = queries::get_song(&pool, song_id)
         .await
@@ -1256,7 +1189,7 @@ pub async fn stage_create(
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
     let input = CreateProductionStage {
@@ -1369,7 +1302,7 @@ pub async fn song_file_new(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     let return_to = query.get("return_to").cloned().unwrap_or_default();
     let song = queries::get_song(&pool, song_id)
@@ -1401,7 +1334,7 @@ pub async fn song_file_create(
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     let input = CreateSongFile {
         song_id,
@@ -1446,7 +1379,7 @@ pub async fn auto_add_stages(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let song_id = path.into_inner();
-    require_edit_access_if_authenticated(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
         .await?;
     queries::auto_add_stages(&pool, song_id)
         .await
@@ -1743,7 +1676,7 @@ pub async fn exercise_create(
         )
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-        grant_creator_admin_share_if_authenticated(
+        permissions::grant_creator_admin_share_if_authenticated(
             &req,
             pocketbase.as_ref(),
             ResourceType::PracticeExercise,
@@ -1842,7 +1775,7 @@ pub async fn goal_create(
     )
     .await
     .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::Goal,
@@ -2222,7 +2155,7 @@ pub async fn set_create(
     let set_id = queries::create_live_set(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    grant_creator_admin_share_if_authenticated(
+    permissions::grant_creator_admin_share_if_authenticated(
         &req,
         pocketbase.as_ref(),
         ResourceType::LiveSet,
