@@ -7,8 +7,11 @@ use std::rc::Rc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use std::path::Path;
+
 use crate::acl::{AccessLevel, CreateShare, GroupMember, GroupShare, ResourceType, Share};
 use crate::auth::{AuthConfig, AuthenticatedUser};
+use crate::jobs::TargetType;
 use crate::pocketbase_client::{PocketBaseClient, PocketBaseClientError};
 
 #[derive(Debug, Error)]
@@ -292,6 +295,68 @@ pub async fn require_group_manage_or_404(
         }
         Err(err) => Err(err),
     }
+}
+
+/// Authorize a `/api/workflows` enqueue request by target.
+///
+/// - Without an `AuthenticatedUser`, the usual single-tenant rule applies:
+///   allowed when `AUTH_REQUIRE_LOGIN=false`, `NotAuthenticated` otherwise.
+/// - `song`/`live_set` targets require edit access on the parsed id
+///   (delegates to `require_edit_access_or_401`, including its skip
+///   semantics for a missing PocketBase client or ACL collections).
+/// - `file`/`directory` targets require the canonicalized path to live
+///   under a `WORKFLOW_ALLOWED_ROOTS` entry (or the upload temp dir, which
+///   the upload handler owns). An authenticated deployment with no roots
+///   configured denies them — the job subprocess would otherwise run
+///   against arbitrary filesystem paths.
+pub async fn authorize_workflow_target(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    target_type: &TargetType,
+    target_id_or_path: &str,
+) -> Result<(), PermissionError> {
+    require_authenticated_or_401(req)?;
+    if authenticated_user(req).is_none() {
+        return Ok(());
+    }
+
+    match target_type {
+        TargetType::Song | TargetType::LiveSet => {
+            let resource_type = match target_type {
+                TargetType::Song => ResourceType::Song,
+                _ => ResourceType::LiveSet,
+            };
+            let id = target_id_or_path
+                .parse::<i64>()
+                .map_err(|_| PermissionError::NotFound)?;
+            require_edit_access_or_401(req, pocketbase, resource_type, id).await
+        }
+        TargetType::File | TargetType::Directory => {
+            let mut roots: Vec<std::path::PathBuf> = req
+                .app_data::<web::Data<AuthConfig>>()
+                .map(|config| config.workflow_allowed_roots.clone())
+                .unwrap_or_default();
+            // The upload handler persists audio under this directory itself.
+            roots.push(std::env::temp_dir().join("pmb_uploads"));
+            if path_under_any_root(target_id_or_path, &roots) {
+                Ok(())
+            } else {
+                Err(PermissionError::NotFound)
+            }
+        }
+    }
+}
+
+/// Whether `path` (canonicalized) lives inside one of `roots`
+/// (canonicalized when possible, compared verbatim otherwise).
+fn path_under_any_root(path: &str, roots: &[std::path::PathBuf]) -> bool {
+    let Ok(canonical) = Path::new(path).canonicalize() else {
+        return false;
+    };
+    roots.iter().any(|root| {
+        let root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        canonical.starts_with(&root)
+    })
 }
 
 /// Whether `user` may manage `group_id`: `owner_id` on the group record, or
@@ -699,6 +764,7 @@ mod tests {
             require_login,
             pocketbase_ca_cert: None,
             public_paths: vec![],
+            workflow_allowed_roots: vec![],
         }
     }
 

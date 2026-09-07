@@ -2516,6 +2516,8 @@ pub struct WorkflowRequest {
 
 pub async fn workflows_enqueue(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
     body: web::Json<WorkflowRequest>,
 ) -> actix_web::Result<HttpResponse> {
@@ -2534,6 +2536,14 @@ pub async fn workflows_enqueue(
     let operation = Operation::parse(&body.operation).ok_or_else(|| {
         actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
     })?;
+
+    permissions::authorize_workflow_target(
+        &req,
+        pocketbase.as_ref(),
+        &target_type,
+        &body.target_id_or_path,
+    )
+    .await?;
 
     let (resolved_paths, output_dir) =
         resolve_paths(&pool, &target_type, &operation, &body.target_id_or_path).await?;
@@ -3042,6 +3052,8 @@ pub struct WorkflowUploadForm {
 
 pub async fn workflows_enqueue_upload(
     pool: web::Data<sqlx::SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
     MultipartForm(form): MultipartForm<WorkflowUploadForm>,
 ) -> actix_web::Result<HttpResponse> {
@@ -3075,6 +3087,16 @@ pub async fn workflows_enqueue_upload(
             .map_err(actix_web::error::ErrorInternalServerError)?;
         target_id_or_path = dest.to_string_lossy().to_string();
     }
+
+    // Runs after the upload rewrite so a persisted temp file is checked
+    // under its real location (the upload temp dir is always allowed).
+    permissions::authorize_workflow_target(
+        &req,
+        pocketbase.as_ref(),
+        &target_type,
+        &target_id_or_path,
+    )
+    .await?;
 
     let (resolved_paths, output_dir) =
         resolve_paths(&pool, &target_type, &operation, &target_id_or_path).await?;

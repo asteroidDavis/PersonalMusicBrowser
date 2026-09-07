@@ -101,6 +101,7 @@ async fn start_harness(pb_url: &str, require_login: bool) -> (Harness, NamedTemp
         require_login,
         pocketbase_ca_cert: None,
         public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
+        workflow_allowed_roots: vec![],
     };
     let pb = PocketBaseClient::new(pb_url.to_string(), reqwest::Client::new());
     let (queue, _rx) = JobQueue::new(16);
