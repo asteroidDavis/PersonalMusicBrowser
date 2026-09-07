@@ -459,11 +459,15 @@ pub struct SongFileFormData {
 pub async fn song_list(
     pool: web::Data<SqlitePool>,
     req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let songs = queries::list_songs(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Song).await?;
+    let mut songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut songs, |s| s.id);
 
     let views: Vec<SongView> = songs
         .into_iter()
@@ -713,11 +717,16 @@ pub async fn song_delete(
 
 pub async fn album_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let albums = queries::list_albums(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Album).await?;
+    let mut albums = queries::list_albums(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut albums, |a| a.id);
     let body = AlbumsTemplate {
         albums,
         csrf_token: _csrf.0,
@@ -785,11 +794,16 @@ pub async fn album_delete(
 
 pub async fn artist_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let artists = queries::list_artists(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Artist).await?;
+    let mut artists = queries::list_artists(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut artists, |a| a.id);
     let views: Vec<ArtistView> = artists
         .into_iter()
         .map(|a| ArtistView {
@@ -881,11 +895,16 @@ pub async fn artist_delete(
 
 pub async fn instrument_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let instruments = queries::list_instruments(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Instrument).await?;
+    let mut instruments = queries::list_instruments(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut instruments, |i| i.id);
     let body = InstrumentsTemplate {
         instruments,
         csrf_token: _csrf.0,
@@ -957,11 +976,16 @@ pub async fn instrument_delete(
 
 pub async fn recording_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let recordings = queries::list_recordings(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Recording).await?;
+    let mut recordings = queries::list_recordings(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut recordings, |r| r.id);
     let songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1013,11 +1037,16 @@ pub async fn recording_delete(
 
 pub async fn band_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let bands = queries::list_bands(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Band).await?;
+    let mut bands = queries::list_bands(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut bands, |b| b.id);
     let body = BandsTemplate {
         bands,
         csrf_token: _csrf.0,
@@ -1103,11 +1132,16 @@ fn song_to_file_views(files: &[SongFile]) -> Vec<FileView> {
 
 pub async fn production_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let data = queries::list_all_production_stages(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Song).await?;
+    let mut data = queries::list_all_production_stages(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut data, |(song, _)| song.id);
 
     let mut songs = Vec::new();
     for (song, stages) in data {
@@ -1417,11 +1451,16 @@ pub async fn auto_add_steps(
 
 pub async fn practice_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let all_songs = queries::list_songs(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Song).await?;
+    let mut all_songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut all_songs, |s| s.id);
 
     let mut songs = Vec::new();
     for song in all_songs {
@@ -1511,13 +1550,18 @@ struct KanbanTemplate {
 
 pub async fn kanban_board(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Song).await?;
     let mut columns = Vec::new();
     for state in WorkflowState::all() {
-        let songs = queries::list_songs_by_workflow_state(&pool, state)
+        let mut songs = queries::list_songs_by_workflow_state(&pool, state)
             .await
             .map_err(actix_web::error::ErrorInternalServerError)?;
+        permissions::retain_visible(&visible, &mut songs, |s| s.id);
         columns.push(KanbanColumn {
             state: state.as_str().to_string(),
             label: state.label().to_string(),
@@ -1619,11 +1663,17 @@ pub struct ExerciseFormData {
 
 pub async fn exercise_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let exercises = queries::list_exercises(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::PracticeExercise)
+            .await?;
+    let mut exercises = queries::list_exercises(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut exercises, |e| e.id);
     let body = ExercisesTemplate {
         exercises,
         csrf_token: _csrf.0,
@@ -1732,11 +1782,16 @@ pub struct GoalFormData {
 
 pub async fn goal_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let goals = queries::list_goals(&pool)
+    let visible =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Goal).await?;
+    let mut goals = queries::list_goals(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible, &mut goals, |g| g.id);
     let body = GoalsTemplate {
         goals,
         csrf_token: _csrf.0,
@@ -2105,14 +2160,22 @@ pub struct PriorityFormData {
 
 pub async fn set_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let sets = queries::list_live_sets(&pool)
+    let visible_sets =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::LiveSet).await?;
+    let visible_songs =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Song).await?;
+    let mut sets = queries::list_live_sets(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let songs = queries::list_songs(&pool)
+    permissions::retain_visible(&visible_sets, &mut sets, |s| s.id);
+    let mut songs = queries::list_songs(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible_songs, &mut songs, |s| s.id);
     let body = SetsTemplate {
         sets,
         songs,
