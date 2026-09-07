@@ -1,5 +1,6 @@
 use crate::acl::{
-    CreateGroup, CreateGroupMember, CreateGroupShare, CreateShare, GroupMember, GroupShare, Share,
+    CreateGroup, CreateGroupMember, CreateGroupShare, CreateShare, Group, GroupMember, GroupShare,
+    Share,
 };
 use crate::auth::AuthConfig;
 use reqwest::StatusCode;
@@ -27,6 +28,15 @@ impl PocketBaseClientError {
             }
             PocketBaseClientError::Request(_) => false,
         }
+    }
+
+    /// The requested record does not exist (or is not visible) — a plain
+    /// PocketBase 404, as opposed to a missing *collection*.
+    pub fn is_not_found(&self) -> bool {
+        matches!(
+            self,
+            PocketBaseClientError::Status { status, .. } if *status == StatusCode::NOT_FOUND
+        ) && !self.is_missing_collection()
     }
 }
 
@@ -140,6 +150,20 @@ impl PocketBaseClient {
     ) -> Result<Vec<GroupMember>, PocketBaseClientError> {
         let filter = format!("group_id = '{}'", escape_filter_value(group_id));
         self.list_records(token, "group_memberships", &filter).await
+    }
+
+    /// Fetch a single `groups` record. PocketBase's view rule allows any
+    /// authenticated user to read it, so callers must compare `owner_id`
+    /// (or the caller's membership role) themselves.
+    pub async fn get_group(
+        &self,
+        token: &str,
+        group_id: &str,
+    ) -> Result<Group, PocketBaseClientError> {
+        let url = self.collection_record_url("groups", group_id);
+        let response = self.http_client.get(url).bearer_auth(token).send().await?;
+        let response = self.ensure_success(response).await?;
+        Ok(response.json().await?)
     }
 
     /// All group memberships for a user (the PocketBase list rule already
