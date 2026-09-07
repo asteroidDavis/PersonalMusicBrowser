@@ -1282,14 +1282,34 @@ pub async fn stage_create(
     Ok(redirect_back(&req, "/production"))
 }
 
+/// Resolve a `production_stages` row's parent song and require edit access
+/// on it — stages/steps/files carry no share of their own.
+async fn require_song_edit_via_stage(
+    pool: &SqlitePool,
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    stage_id: i64,
+) -> actix_web::Result<()> {
+    let song_id = queries::song_id_for_production_stage(pool, stage_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or(permissions::PermissionError::NotFound)?;
+    permissions::require_edit_access_or_401(req, pocketbase, ResourceType::Song, song_id).await?;
+    Ok(())
+}
+
 pub async fn stage_update_status(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    let stage_id = path.into_inner();
+    require_song_edit_via_stage(&pool, &req, pocketbase.as_ref(), stage_id).await?;
     let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
-    queries::update_production_stage_status(&pool, path.into_inner(), &status)
+    queries::update_production_stage_status(&pool, stage_id, &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())
@@ -1297,10 +1317,14 @@ pub async fn stage_update_status(
 
 pub async fn stage_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_production_stage(&pool, path.into_inner())
+    let stage_id = path.into_inner();
+    require_song_edit_via_stage(&pool, &req, pocketbase.as_ref(), stage_id).await?;
+    queries::delete_production_stage(&pool, stage_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())
@@ -1308,10 +1332,13 @@ pub async fn stage_delete(
 
 pub async fn step_new(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let stage_id = path.into_inner();
+    require_song_edit_via_stage(&pool, &req, pocketbase.as_ref(), stage_id).await?;
     let instruments = queries::list_instruments(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
@@ -1339,14 +1366,17 @@ pub async fn step_new(
 pub async fn step_create(
     req: HttpRequest,
     pool: web::Data<SqlitePool>,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<StepFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let form = form.0;
+    let stage_id = path.into_inner();
+    require_song_edit_via_stage(&pool, &req, pocketbase.as_ref(), stage_id).await?;
     let status = ProductionStatus::parse(&form.status).unwrap_or(ProductionStatus::NotStarted);
     let input = CreateProductionStep {
-        stage_id: path.into_inner(),
+        stage_id,
         instrument_id: form.instrument_id,
         name: form.name,
         status,
@@ -1361,12 +1391,21 @@ pub async fn step_create(
 
 pub async fn step_update_status(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     form: QsForm<StatusFormData>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    let step_id = path.into_inner();
+    let song_id = queries::song_id_for_production_step(&pool, step_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or(permissions::PermissionError::NotFound)?;
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
     let status = ProductionStatus::parse(&form.0.status).unwrap_or(ProductionStatus::NotStarted);
-    queries::update_production_step_status(&pool, path.into_inner(), &status)
+    queries::update_production_step_status(&pool, step_id, &status)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())
@@ -1437,10 +1476,19 @@ pub async fn song_file_create(
 
 pub async fn song_file_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_song_file(&pool, path.into_inner())
+    let file_id = path.into_inner();
+    let song_id = queries::song_id_for_song_file(&pool, file_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or(permissions::PermissionError::NotFound)?;
+    permissions::require_edit_access_or_401(&req, pocketbase.as_ref(), ResourceType::Song, song_id)
+        .await?;
+    queries::delete_song_file(&pool, file_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::NoContent().finish())
@@ -1468,10 +1516,13 @@ pub async fn auto_add_stages(
 
 pub async fn auto_add_steps(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let stage_id = path.into_inner();
+    require_song_edit_via_stage(&pool, &req, pocketbase.as_ref(), stage_id).await?;
     // Determine if the song is a cover to pick the right composition steps
     let is_cover: bool = sqlx::query_scalar(
         "SELECT CASE WHEN s.song_type = 'cover' THEN 1 ELSE 0 END \

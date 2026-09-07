@@ -342,7 +342,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "production_stages",
                 conditions: &[("id", "{id}"), ("status", "in_progress")],
             },
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -353,7 +353,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("production_stages"),
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -367,7 +367,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "production_steps",
                 conditions: &[("stage_id", "{id}")],
             },
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -381,7 +381,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "production_steps",
                 conditions: &[("id", "{id}"), ("status", "in_progress")],
             },
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -406,7 +406,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("song_files"),
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     MutatingRoute {
@@ -434,7 +434,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "production_steps",
                 conditions: &[("stage_id", "{id}")],
             },
-            open_until: Some("PR 7"),
+            open_until: None,
         },
     },
     // --- Kanban workflow state ---

@@ -2228,6 +2228,43 @@ pub async fn add_song_to_set(
     Ok(result.last_insert_rowid())
 }
 
+/// The owning `songs` id for a `production_stages` row — used by handlers
+/// that receive a stage id but authorize on the parent song.
+pub async fn song_id_for_production_stage(
+    pool: &SqlitePool,
+    stage_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT song_id FROM production_stages WHERE id = ?")
+        .bind(stage_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// The owning `songs` id for a `production_steps` row (via its stage).
+pub async fn song_id_for_production_step(
+    pool: &SqlitePool,
+    step_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT ps.song_id FROM production_steps st \
+         JOIN production_stages ps ON ps.id = st.stage_id WHERE st.id = ?",
+    )
+    .bind(step_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// The owning `songs` id for a `song_files` row.
+pub async fn song_id_for_song_file(
+    pool: &SqlitePool,
+    file_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT song_id FROM song_files WHERE id = ?")
+        .bind(file_id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// The owning `live_sets` id for a `live_set_songs` join row, used by
 /// handlers that receive the join row id but authorize on the parent set.
 pub async fn live_set_id_for_join_row(
