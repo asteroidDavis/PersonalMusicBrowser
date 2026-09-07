@@ -1,12 +1,15 @@
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::error::{Error, ErrorBadRequest, ErrorUnauthorized};
-use actix_web::{web, HttpMessage, HttpResponse, ResponseError};
+use actix_web::{web, HttpMessage, HttpRequest, HttpResponse, ResponseError};
 use askama::Template;
 use futures_util::future::LocalBoxFuture;
 use log::{info, warn};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::future::{ready, Ready};
 use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use actix_csrf_middleware::CsrfToken;
 
@@ -76,9 +79,112 @@ pub struct AuthenticatedUser {
 }
 
 #[derive(Debug, Clone)]
-struct VerifiedToken {
+pub(crate) struct VerifiedToken {
     token: String,
     user_id: String,
+}
+
+/// How long a verified token result is reused before re-checking
+/// PocketBase's auth-refresh endpoint.
+const TOKEN_CACHE_TTL: Duration = Duration::from_secs(5);
+/// Bound on cached verifications; earliest-expiring entries are evicted
+/// first once the cache is full.
+const TOKEN_CACHE_MAX_ENTRIES: usize = 4096;
+
+/// In-memory cache of recently verified auth tokens, shared between
+/// `JwtMiddleware` and the logout handler via `web::Data`.
+///
+/// Without it, `JwtMiddleware` issues one auth-refresh HTTP request to
+/// PocketBase per incoming request, which dominates request latency for
+/// UI bursts and polling clients. Verified results are reused for `ttl`;
+/// entries are keyed by a SHA-256 hash of the presented token so raw
+/// tokens are never stored, and `invalidate` (called by `logout`) drops
+/// them immediately.
+pub struct TokenVerifyCache {
+    inner: Mutex<HashMap<[u8; 32], CachedVerification>>,
+    ttl: Duration,
+    max_entries: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CachedVerification {
+    user_id: String,
+    /// The token PocketBase returned from auth-refresh (may be rotated).
+    token: String,
+    expires_at: Instant,
+}
+
+impl Default for TokenVerifyCache {
+    fn default() -> Self {
+        Self::new(TOKEN_CACHE_TTL, TOKEN_CACHE_MAX_ENTRIES)
+    }
+}
+
+impl TokenVerifyCache {
+    pub fn new(ttl: Duration, max_entries: usize) -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            ttl,
+            max_entries,
+        }
+    }
+
+    fn hash(token: &str) -> [u8; 32] {
+        let mut hasher = openssl::sha::Sha256::new();
+        hasher.update(token.as_bytes());
+        hasher.finish()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<[u8; 32], CachedVerification>> {
+        self.inner.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// The cached verification for `token`, if still fresh.
+    pub(crate) fn get(&self, token: &str) -> Option<CachedVerification> {
+        let key = Self::hash(token);
+        let mut inner = self.lock();
+        match inner.get(&key) {
+            Some(entry) if entry.expires_at > Instant::now() => Some(entry.clone()),
+            Some(_) => {
+                inner.remove(&key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Cache a successful verification. `presented` is the token the
+    /// client sent; the rotated `verified.token` is registered too so
+    /// follow-up requests presenting either hit the cache.
+    pub(crate) fn store(&self, presented: &str, verified: &VerifiedToken) {
+        let entry = CachedVerification {
+            user_id: verified.user_id.clone(),
+            token: verified.token.clone(),
+            expires_at: Instant::now() + self.ttl,
+        };
+        let now = Instant::now();
+        let mut inner = self.lock();
+        inner.retain(|_, e| e.expires_at > now);
+        while inner.len() >= self.max_entries {
+            let Some(oldest) = inner
+                .iter()
+                .min_by_key(|(_, e)| e.expires_at)
+                .map(|(k, _)| *k)
+            else {
+                break;
+            };
+            inner.remove(&oldest);
+        }
+        inner.insert(Self::hash(presented), entry.clone());
+        if verified.token != presented {
+            inner.insert(Self::hash(&verified.token), entry);
+        }
+    }
+
+    /// Drop any cached verification for `token` (e.g. on logout).
+    pub(crate) fn invalidate(&self, token: &str) {
+        self.lock().remove(&Self::hash(token));
+    }
 }
 
 impl AuthConfig {
@@ -168,11 +274,15 @@ impl AuthConfig {
 
 pub struct JwtMiddleware {
     config: AuthConfig,
+    token_cache: web::Data<TokenVerifyCache>,
 }
 
 impl JwtMiddleware {
-    pub fn new(config: AuthConfig) -> Self {
-        JwtMiddleware { config }
+    pub fn new(config: AuthConfig, token_cache: web::Data<TokenVerifyCache>) -> Self {
+        JwtMiddleware {
+            config,
+            token_cache,
+        }
     }
 }
 
@@ -237,6 +347,7 @@ where
         ready(Ok(JwtMiddlewareService {
             service: Rc::new(service),
             config: self.config.clone(),
+            token_cache: self.token_cache.clone(),
         }))
     }
 }
@@ -244,6 +355,7 @@ where
 pub struct JwtMiddlewareService<S> {
     service: Rc<S>,
     config: AuthConfig,
+    token_cache: web::Data<TokenVerifyCache>,
 }
 
 #[derive(Debug)]
@@ -300,6 +412,7 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let config = self.config.clone();
         let service = self.service.clone();
+        let token_cache = self.token_cache.clone();
 
         Box::pin(async move {
             let mut token_opt = None;
@@ -320,20 +433,32 @@ where
                 }
             }
 
-            // Verify token using PocketBase's auth-refresh endpoint
+            // Verify token against the shared cache first, then
+            // PocketBase's auth-refresh endpoint on a miss.
             let (verified_token, original_token) = if let Some(ref token) = token_opt {
-                match verify_token_with_pocketbase(token, &config).await {
-                    Ok(Some(verified)) => {
-                        info!(
-                            "[AUTH_SUCCESS] Token verified and refreshed for request to {}",
-                            req.path()
-                        );
-                        (Some(verified), Some(token.clone()))
-                    }
-                    Ok(None) => (None, Some(token.clone())),
-                    Err(_) => {
-                        warn!("[AUTH_FAILED] Invalid token for request to {}", req.path());
-                        (None, Some(token.clone()))
+                if let Some(cached) = token_cache.get(token) {
+                    (
+                        Some(VerifiedToken {
+                            token: cached.token,
+                            user_id: cached.user_id,
+                        }),
+                        Some(token.clone()),
+                    )
+                } else {
+                    match verify_token_with_pocketbase(token, &config).await {
+                        Ok(Some(verified)) => {
+                            info!(
+                                "[AUTH_SUCCESS] Token verified and refreshed for request to {}",
+                                req.path()
+                            );
+                            token_cache.store(token, &verified);
+                            (Some(verified), Some(token.clone()))
+                        }
+                        Ok(None) => (None, Some(token.clone())),
+                        Err(_) => {
+                            warn!("[AUTH_FAILED] Invalid token for request to {}", req.path());
+                            (None, Some(token.clone()))
+                        }
                     }
                 }
             } else {
@@ -649,9 +774,24 @@ pub async fn login_submit(
 }
 
 pub async fn logout(
+    req: HttpRequest,
     _csrf: actix_csrf_middleware::CsrfToken,
     config: web::Data<AuthConfig>,
+    token_cache: Option<web::Data<TokenVerifyCache>>,
 ) -> actix_web::Result<HttpResponse> {
+    if let Some(cache) = token_cache {
+        let presented = req
+            .headers()
+            .get("Authorization")
+            .and_then(|header| header.to_str().ok())
+            .and_then(|header| header.strip_prefix("Bearer "))
+            .map(str::to_string)
+            .or_else(|| req.cookie("auth_token").map(|c| c.value().to_string()));
+        if let Some(token) = presented {
+            cache.invalidate(&token);
+        }
+    }
+
     let mut cookie = actix_web::cookie::Cookie::named("auth_token");
     cookie.make_removal();
     cookie.set_path("/");
@@ -732,5 +872,62 @@ mod tests {
             public_paths: vec!["/login".into()],
         };
         assert!(config.is_insecure());
+    }
+
+    fn verified(user_id: &str, token: &str) -> VerifiedToken {
+        VerifiedToken {
+            user_id: user_id.into(),
+            token: token.into(),
+        }
+    }
+
+    #[test]
+    fn token_cache_reuses_verification_within_ttl() {
+        let cache = TokenVerifyCache::new(Duration::from_secs(60), 16);
+        cache.store("presented", &verified("user-1", "rotated"));
+
+        let hit = cache.get("presented").expect("cache hit expected");
+        assert_eq!(hit.user_id, "user-1");
+        assert_eq!(hit.token, "rotated");
+        // The rotated token is also indexed so cookie clients presenting
+        // the rotated token hit the same entry.
+        let rotated_hit = cache.get("rotated").expect("rotated key hit");
+        assert_eq!(rotated_hit.user_id, "user-1");
+    }
+
+    #[test]
+    fn token_cache_expires_entries() {
+        let cache = TokenVerifyCache::new(Duration::ZERO, 16);
+        cache.store("presented", &verified("user-1", "rotated"));
+        assert!(cache.get("presented").is_none());
+    }
+
+    #[test]
+    fn token_cache_invalidate_drops_entry() {
+        let cache = TokenVerifyCache::default();
+        cache.store("presented", &verified("user-1", "rotated"));
+        cache.invalidate("presented");
+        assert!(cache.get("presented").is_none());
+    }
+
+    #[test]
+    fn token_cache_evicts_oldest_at_capacity() {
+        let cache = TokenVerifyCache::new(Duration::from_secs(60), 2);
+        cache.store("a", &verified("u", "a-t"));
+        std::thread::sleep(Duration::from_millis(1));
+        cache.store("b", &verified("u", "b-t"));
+        std::thread::sleep(Duration::from_millis(1));
+        // Capacity reached: the earliest-expiring entry is evicted.
+        cache.store("c", &verified("u", "c-t"));
+
+        assert!(cache.get("a").is_none());
+        assert!(cache.get("b").is_some());
+        assert!(cache.get("c").is_some());
+    }
+
+    #[test]
+    fn token_cache_rejects_unknown_tokens() {
+        let cache = TokenVerifyCache::default();
+        assert!(cache.get("never-stored").is_none());
     }
 }

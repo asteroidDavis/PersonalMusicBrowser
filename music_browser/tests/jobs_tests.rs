@@ -130,7 +130,10 @@ async fn test_jobs_endpoint_with_pool_data() {
             .app_data(queue_data.clone())
             .wrap(middleware::Condition::new(
                 false, // Disable JWT
-                music_browser::auth::JwtMiddleware::new(auth_data.get_ref().clone()),
+                music_browser::auth::JwtMiddleware::new(
+                    auth_data.get_ref().clone(),
+                    web::Data::new(music_browser::auth::TokenVerifyCache::default()),
+                ),
             ))
             .wrap(CsrfMiddleware::new(csrf_config))
             .configure(app::configure_app),
@@ -307,7 +310,10 @@ async fn test_jobs_endpoint_with_csrf_no_jwt() {
             .app_data(queue_data.clone())
             .wrap(middleware::Condition::new(
                 false, // Disable JWT
-                music_browser::auth::JwtMiddleware::new(auth_data.get_ref().clone()),
+                music_browser::auth::JwtMiddleware::new(
+                    auth_data.get_ref().clone(),
+                    web::Data::new(music_browser::auth::TokenVerifyCache::default()),
+                ),
             ))
             .wrap(CsrfMiddleware::new(csrf_config))
             .configure(app::configure_app),

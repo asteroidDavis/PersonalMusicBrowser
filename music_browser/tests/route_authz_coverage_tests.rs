@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use music_browser::acl::{AccessLevel, CreateGroup, CreateShare, ResourceType};
 use music_browser::app;
-use music_browser::auth::{AuthConfig, AuthenticatedUser, JwtMiddleware};
+use music_browser::auth::{AuthConfig, AuthenticatedUser, JwtMiddleware, TokenVerifyCache};
 use music_browser::jobs::{JobQueue, JobStore};
 use music_browser::permissions;
 use music_browser::pocketbase_client::PocketBaseClient;
@@ -881,7 +881,10 @@ async fn start_harness(pb_url: &str) -> (Harness, NamedTempFile) {
                 .app_data(csrf_data.clone())
                 .wrap(middleware::Condition::new(
                     factory_config.require_login,
-                    JwtMiddleware::new(factory_config.clone()),
+                    JwtMiddleware::new(
+                        factory_config.clone(),
+                        web::Data::new(TokenVerifyCache::default()),
+                    ),
                 ))
                 .wrap(CsrfMiddleware::new(csrf_data.clone()))
                 .configure(app::configure_app)
