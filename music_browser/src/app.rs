@@ -2554,6 +2554,15 @@ pub async fn share_create(
 ) -> actix_web::Result<HttpResponse> {
     let user = permissions::authenticated_user(&req)
         .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let resource_type = ResourceType::parse(&payload.resource_type)
+        .ok_or(permissions::PermissionError::NotFound)?;
+    let resource_id = payload
+        .resource_id
+        .parse::<i64>()
+        .map_err(|_| permissions::PermissionError::NotFound)?;
+    // Granting access is privileged: require admin on the resource.
+    permissions::require_admin_access_or_401(&req, Some(&pocketbase), resource_type, resource_id)
+        .await?;
     let share = CreateShare {
         user_id: payload.user_id.clone(),
         resource_type: payload.resource_type.clone(),
@@ -2617,8 +2626,10 @@ pub async fn group_member_add(
 ) -> actix_web::Result<HttpResponse> {
     let user = permissions::authenticated_user(&req)
         .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let group_id = path.into_inner();
+    permissions::require_group_manage_or_404(&req, Some(&pocketbase), &group_id).await?;
     let member = CreateGroupMember {
-        group_id: path.into_inner(),
+        group_id,
         user_id: payload.user_id.clone(),
         role: payload.role,
     };
@@ -2651,8 +2662,18 @@ pub async fn group_share_create(
 ) -> actix_web::Result<HttpResponse> {
     let user = permissions::authenticated_user(&req)
         .ok_or(permissions::PermissionError::NotAuthenticated)?;
+    let group_id = path.into_inner();
+    permissions::require_group_manage_or_404(&req, Some(&pocketbase), &group_id).await?;
+    let resource_type = ResourceType::parse(&payload.resource_type)
+        .ok_or(permissions::PermissionError::NotFound)?;
+    let resource_id = payload
+        .resource_id
+        .parse::<i64>()
+        .map_err(|_| permissions::PermissionError::NotFound)?;
+    permissions::require_admin_access_or_401(&req, Some(&pocketbase), resource_type, resource_id)
+        .await?;
     let group_share = CreateGroupShare {
-        group_id: path.into_inner(),
+        group_id,
         resource_type: payload.resource_type.clone(),
         resource_id: payload.resource_id.clone(),
         access_level: payload.access_level,
