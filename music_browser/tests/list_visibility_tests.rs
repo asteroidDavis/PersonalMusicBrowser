@@ -402,3 +402,229 @@ async fn single_tenant_lists_stay_unfiltered() {
         "single-tenant mode shows everything"
     );
 }
+
+/// `/schedule` and `/schedule/export.ics` hide items that reference
+/// resources the caller cannot access; items with no resource references
+/// stay visible (there is no resource data to leak).
+#[actix_web::test]
+async fn schedule_list_filters_items_by_linked_resource_access() {
+    let Some(pb_url) = pb_url() else {
+        eprintln!("skipping: POCKETBASE_TEST_URL not set");
+        return;
+    };
+    let (h, _tmp) = start_harness(&pb_url, true).await;
+
+    // One resource of each linkable kind, owned by user A only.
+    insert_row(
+        &h.pool,
+        "INSERT INTO songs (id, title) VALUES (92001, 'sched-hidden-song')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO practice_exercises (id, name) VALUES (92002, 'sched-hidden-exercise')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO instruments (id, name) VALUES (92003, 'sched-hidden-instrument')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO production_stages (id, song_id, stage) VALUES (92004, 92001, 'tracking')",
+        &[],
+    )
+    .await;
+    grant(&h, &h.user_a, ResourceType::Song, 92001, AccessLevel::Admin).await;
+    grant(
+        &h,
+        &h.user_a,
+        ResourceType::PracticeExercise,
+        92002,
+        AccessLevel::Admin,
+    )
+    .await;
+    grant(
+        &h,
+        &h.user_a,
+        ResourceType::Instrument,
+        92003,
+        AccessLevel::Admin,
+    )
+    .await;
+
+    insert_row(&h.pool, "INSERT INTO schedule_events (id, event_date, title) VALUES (92010, '2030-01-10', 'sched-test-event')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, song_id, title) VALUES (92020, 92010, 'song_practice', 92001, 'item-hidden-song')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, exercise_id, title) VALUES (92021, 92010, 'exercise', 92002, 'item-hidden-exercise')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, instrument_id, title) VALUES (92022, 92010, 'warmup', 92003, 'item-hidden-instrument')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, stage_id, title) VALUES (92023, 92010, 'song_production', 92004, 'item-hidden-stage')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, title) VALUES (92024, 92010, 'warmup', 'item-open-warmup')", &[]).await;
+
+    let (status, body) = get(&h, "/schedule", Some(&h.user_a.token)).await;
+    assert_eq!(status, StatusCode::OK);
+    for marker in [
+        "item-hidden-song",
+        "item-hidden-exercise",
+        "item-hidden-instrument",
+        "item-hidden-stage",
+        "item-open-warmup",
+    ] {
+        assert!(body.contains(marker), "A sees {marker}");
+    }
+
+    for path in ["/schedule", "/schedule/export.ics"] {
+        let (status, body) = get(&h, path, Some(&h.user_b.token)).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        for marker in [
+            "item-hidden-song",
+            "item-hidden-exercise",
+            "item-hidden-instrument",
+            "item-hidden-stage",
+        ] {
+            assert!(!body.contains(marker), "B must not see {marker} on {path}");
+        }
+        assert!(
+            body.contains("item-open-warmup"),
+            "unreferenced items stay visible on {path}"
+        );
+    }
+}
+
+/// `/profile`'s practice journal lists only entries whose linked goal or
+/// schedule item resolves to resources the caller can access.
+#[actix_web::test]
+async fn profile_journal_filters_entries_by_linked_resource_access() {
+    let Some(pb_url) = pb_url() else {
+        eprintln!("skipping: POCKETBASE_TEST_URL not set");
+        return;
+    };
+    let (h, _tmp) = start_harness(&pb_url, true).await;
+
+    // A-owned song + goal; one journal entry of each type linked to them.
+    insert_row(
+        &h.pool,
+        "INSERT INTO songs (id, title) VALUES (92101, 'journal-hidden-song')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO goals (id, horizon, title) VALUES (92102, '1_week', 'journal-hidden-goal')",
+        &[],
+    )
+    .await;
+    grant(&h, &h.user_a, ResourceType::Song, 92101, AccessLevel::Admin).await;
+    grant(&h, &h.user_a, ResourceType::Goal, 92102, AccessLevel::Admin).await;
+
+    insert_row(&h.pool, "INSERT INTO schedule_events (id, event_date, title) VALUES (92110, '2030-01-11', 'journal-test-event')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, song_id, title) VALUES (92120, 92110, 'song_practice', 92101, 'journal-hidden-item')", &[]).await;
+    insert_row(&h.pool, "INSERT INTO journal_entries (id, entry_date, entry_type, goal_id) VALUES (92130, '2030-01-11', 'goal', 92102)", &[]).await;
+    insert_row(&h.pool, "INSERT INTO journal_entries (id, entry_date, entry_type, schedule_item_id) VALUES (92131, '2030-01-11', 'schedule_item', 92120)", &[]).await;
+
+    let (status, body) = get(&h, "/profile", Some(&h.user_a.token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("journal-hidden-goal"), "A sees goal entry");
+    assert!(body.contains("journal-hidden-song"), "A sees item entry");
+
+    let (status, body) = get(&h, "/profile", Some(&h.user_b.token)).await;
+    assert_eq!(status, StatusCode::OK);
+    for marker in [
+        "journal-hidden-goal",
+        "journal-hidden-song",
+        "journal-hidden-item",
+    ] {
+        assert!(!body.contains(marker), "B must not see {marker}");
+    }
+}
+
+/// The song edit form lists only artists the caller can access — except
+/// artists already linked to the song, which must remain listed so
+/// saving the form does not silently drop their association.
+#[actix_web::test]
+async fn song_edit_form_lists_only_accessible_artists() {
+    let Some(pb_url) = pb_url() else {
+        eprintln!("skipping: POCKETBASE_TEST_URL not set");
+        return;
+    };
+    let (h, _tmp) = start_harness(&pb_url, true).await;
+
+    insert_row(
+        &h.pool,
+        "INSERT INTO songs (id, title) VALUES (92201, 'artist-form-song')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO artists (id, name) VALUES (92202, 'artist-shared-b')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO artists (id, name) VALUES (92203, 'artist-hidden-b')",
+        &[],
+    )
+    .await;
+    insert_row(
+        &h.pool,
+        "INSERT INTO artists (id, name) VALUES (92204, 'artist-linked-hidden')",
+        &[],
+    )
+    .await;
+    grant(
+        &h,
+        &h.user_b,
+        ResourceType::Song,
+        92201,
+        AccessLevel::Editor,
+    )
+    .await;
+    grant(
+        &h,
+        &h.user_b,
+        ResourceType::Artist,
+        92202,
+        AccessLevel::Viewer,
+    )
+    .await;
+    grant(
+        &h,
+        &h.user_a,
+        ResourceType::Artist,
+        92203,
+        AccessLevel::Admin,
+    )
+    .await;
+    grant(
+        &h,
+        &h.user_a,
+        ResourceType::Artist,
+        92204,
+        AccessLevel::Admin,
+    )
+    .await;
+    // 92204 is already an artist of the song — B has no share on it.
+    insert_row(
+        &h.pool,
+        "INSERT INTO song_artists (song_id, artist_id) VALUES (92201, 92204)",
+        &[],
+    )
+    .await;
+
+    let (status, body) = get(&h, "/songs/92201/edit", Some(&h.user_b.token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("artist-shared-b"), "shared artist listed");
+    assert!(
+        !body.contains("artist-hidden-b"),
+        "unshared artist hidden from the form"
+    );
+    assert!(
+        body.contains("artist-linked-hidden"),
+        "already-linked artist stays listed to preserve the association"
+    );
+}

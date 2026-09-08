@@ -423,6 +423,93 @@ pub async fn list_visibility(
     }
 }
 
+/// Resource-type visibility for views that render rows *linked to*
+/// shareable resources — the practice schedule (`schedule_items` may carry
+/// song/exercise/instrument/stage references) and the journal (`goal` or
+/// `schedule_item` references). `None` from `linked_visibility` means
+/// unfiltered, under the same skip semantics as `list_visibility`.
+pub struct LinkedVisibility {
+    pub songs: Rc<HashSet<i64>>,
+    pub exercises: Rc<HashSet<i64>>,
+    pub instruments: Rc<HashSet<i64>>,
+    pub goals: Rc<HashSet<i64>>,
+}
+
+impl LinkedVisibility {
+    /// Whether an optional resource reference is accessible. `None`
+    /// references pass — the row's own title/notes carry no resource data.
+    fn ref_visible(set: &HashSet<i64>, id: Option<i64>) -> bool {
+        id.is_none_or(|i| set.contains(&i))
+    }
+
+    /// Whether a schedule item may be shown: every resource it references
+    /// must be accessible. `stage_songs` maps `production_stages.id` to the
+    /// owning `songs.id`; a stage with no resolvable parent hides the item.
+    pub fn schedule_item_visible(
+        &self,
+        item: &crate::db::models::ScheduleItem,
+        stage_songs: &HashMap<i64, i64>,
+    ) -> bool {
+        Self::ref_visible(&self.songs, item.song_id)
+            && Self::ref_visible(&self.exercises, item.exercise_id)
+            && Self::ref_visible(&self.instruments, item.instrument_id)
+            && match item.stage_id {
+                None => true,
+                Some(stage_id) => stage_songs
+                    .get(&stage_id)
+                    .is_some_and(|song_id| self.songs.contains(song_id)),
+            }
+    }
+}
+
+/// Compute `LinkedVisibility` for the request's `AuthenticatedUser`.
+/// - No user + `AUTH_REQUIRE_LOGIN=false` → `Ok(None)` (unfiltered).
+/// - No user + login required → `NotAuthenticated` (fail closed).
+/// - Missing PB client or missing ACL collections → `Ok(None)` with a
+///   warning, matching `list_visibility`.
+pub async fn linked_visibility(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+) -> Result<Option<Rc<LinkedVisibility>>, PermissionError> {
+    let Some(user) = authenticated_user(req) else {
+        return if login_required(req) {
+            Err(PermissionError::NotAuthenticated)
+        } else {
+            Ok(None)
+        };
+    };
+    let Some(pocketbase) = pocketbase.map(|d| d.get_ref()) else {
+        warn!(
+            "[ACL_LIST_SKIPPED] PocketBase client missing for linked_visibility user_id={}",
+            user.id
+        );
+        return Ok(None);
+    };
+    // Each call is request-memoized; MissingAclCollections degrades the
+    // whole view to unfiltered, matching list_visibility.
+    let (songs, exercises, instruments, goals) = match (
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Song).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::PracticeExercise).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Instrument).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Goal).await,
+    ) {
+        (Err(PermissionError::MissingAclCollections), _, _, _)
+        | (_, Err(PermissionError::MissingAclCollections), _, _)
+        | (_, _, Err(PermissionError::MissingAclCollections), _)
+        | (_, _, _, Err(PermissionError::MissingAclCollections)) => return Ok(None),
+        (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => {
+            return Err(e)
+        }
+        (Ok(s), Ok(e), Ok(i), Ok(g)) => (s, e, i, g),
+    };
+    Ok(Some(Rc::new(LinkedVisibility {
+        songs,
+        exercises,
+        instruments,
+        goals,
+    })))
+}
+
 /// Retain only rows whose `id` is in `visible`, when `visible` is
 /// `Some`. `None` means list filtering is disabled — keep everything.
 pub fn retain_visible<T>(
