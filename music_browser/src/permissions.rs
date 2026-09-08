@@ -1,6 +1,9 @@
 use actix_web::HttpMessage;
 use actix_web::{http::StatusCode, web, HttpRequest, HttpResponse, ResponseError};
 use log::{info, warn};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -190,8 +193,9 @@ pub async fn require_edit_access_or_401(
         );
         return Ok(());
     };
-    match require_edit_access(pocketbase, &user, resource_type, resource_id).await {
-        Ok(_) => Ok(()),
+    match check_user_access_cached(req, pocketbase, &user, resource_type, resource_id).await {
+        Ok(Some(access)) if access.access_level.can_edit() => Ok(()),
+        Ok(_) => Err(PermissionError::NotFound),
         Err(PermissionError::MissingAclCollections) => {
             warn!(
                 "[ACL_CHECK_SKIPPED] PocketBase ACL collections missing for resource_type={} resource_id={} user_id={}",
@@ -240,6 +244,119 @@ pub async fn grant_creator_admin_share_if_authenticated(
         }
         Err(err) => Err(err),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-request ACL memoization
+// ---------------------------------------------------------------------------
+
+/// PocketBase ACL lookups already performed for this request, stored in
+/// the request's extensions.
+///
+/// Multiple authorization checks within one request (e.g. a
+/// parent-resource cascade that resolves a child's song and then checks
+/// the song) issue a single PocketBase list request per resource/user
+/// instead of one per check.
+#[derive(Clone, Default)]
+pub struct RequestAclCache {
+    inner: Rc<RefCell<RequestAclCacheInner>>,
+}
+
+#[derive(Default)]
+struct RequestAclCacheInner {
+    /// `shares` rows for a resource, keyed by (resource_type, resource_id).
+    resource_shares: HashMap<(ResourceType, i64), Rc<Vec<Share>>>,
+    /// All `shares` rows granted to a user, keyed by user id.
+    user_shares: HashMap<String, Rc<Vec<Share>>>,
+}
+
+fn request_acl_cache(req: &HttpRequest) -> RequestAclCache {
+    if let Some(cache) = req.extensions().get::<RequestAclCache>() {
+        return cache.clone();
+    }
+    let cache = RequestAclCache::default();
+    req.extensions_mut().insert(cache.clone());
+    cache
+}
+
+/// `PocketBaseClient::list_resource_shares` memoized for the lifetime of
+/// `req`: repeated lookups of the same resource within one request issue
+/// a single PocketBase call.
+pub async fn resource_shares_cached(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+    resource_type: ResourceType,
+    resource_id: i64,
+) -> Result<Rc<Vec<Share>>, PermissionError> {
+    let cache = request_acl_cache(req);
+    if let Some(shares) = cache
+        .inner
+        .borrow()
+        .resource_shares
+        .get(&(resource_type, resource_id))
+    {
+        return Ok(Rc::clone(shares));
+    }
+    let shares = Rc::new(
+        pb_client
+            .list_resource_shares(
+                &user.token,
+                resource_type.as_str(),
+                &resource_id.to_string(),
+            )
+            .await
+            .map_err(|err| permission_backend_error(err, "resource_shares_cached"))?,
+    );
+    cache
+        .inner
+        .borrow_mut()
+        .resource_shares
+        .insert((resource_type, resource_id), Rc::clone(&shares));
+    Ok(shares)
+}
+
+/// `PocketBaseClient::list_user_shares` memoized for the lifetime of
+/// `req`. Used by list-view filtering which needs the user's grants for
+/// many resources of one type.
+pub async fn user_shares_cached(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+) -> Result<Rc<Vec<Share>>, PermissionError> {
+    let cache = request_acl_cache(req);
+    if let Some(shares) = cache.inner.borrow().user_shares.get(&user.id) {
+        return Ok(Rc::clone(shares));
+    }
+    let shares = Rc::new(
+        pb_client
+            .list_user_shares(&user.token, &user.id)
+            .await
+            .map_err(|err| permission_backend_error(err, "user_shares_cached"))?,
+    );
+    cache
+        .inner
+        .borrow_mut()
+        .user_shares
+        .insert(user.id.clone(), Rc::clone(&shares));
+    Ok(shares)
+}
+
+/// `check_user_access` against the request's memoized ACL cache.
+pub async fn check_user_access_cached(
+    req: &HttpRequest,
+    pb_client: &PocketBaseClient,
+    user: &AuthenticatedUser,
+    resource_type: ResourceType,
+    resource_id: i64,
+) -> Result<Option<ResourceAccess>, PermissionError> {
+    let shares = resource_shares_cached(req, pb_client, user, resource_type, resource_id).await?;
+    Ok(
+        best_access_for_user(&shares, &user.id).map(|access_level| ResourceAccess {
+            user_id: user.id.clone(),
+            access_level,
+        }),
+    )
 }
 
 fn best_access_for_user(shares: &[Share], user_id: &str) -> Option<AccessLevel> {
