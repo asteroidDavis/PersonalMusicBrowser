@@ -501,14 +501,21 @@ pub async fn song_list(
 
 pub async fn song_new(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let albums = queries::list_albums(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let artists = queries::list_artists(&pool)
+    let mut artists = queries::list_artists(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(
+        &permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Artist).await?,
+        &mut artists,
+        |a| a.id,
+    );
 
     let body = SongFormTemplate {
         editing: false,
@@ -604,11 +611,18 @@ pub async fn song_edit(
     let albums = queries::list_albums(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let artists = queries::list_artists(&pool)
+    let mut artists = queries::list_artists(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
 
     let selected_artist_ids: Vec<i64> = song.artists.iter().map(|a| a.id).collect();
+    // Only artists the caller can access are selectable; keep the song's
+    // current artists listed so saving doesn't silently drop links.
+    if let Some(visible_artists) =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::Artist).await?
+    {
+        artists.retain(|a| visible_artists.contains(&a.id) || selected_artist_ids.contains(&a.id));
+    }
 
     let body = SongFormTemplate {
         editing: true,
@@ -2019,6 +2033,8 @@ pub struct ProfileFormData {
 
 pub async fn profile_view(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     query: web::Query<std::collections::HashMap<String, String>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
@@ -2029,15 +2045,30 @@ pub async fn profile_view(
     let profile = queries::get_profile(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    let journal_entries = queries::list_journal_entries(&pool, Some(per_page), Some(offset))
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?;
 
-    // Get total count for pagination
-    let total_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM journal_entries")
-        .fetch_one(&**pool)
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+    let vis = permissions::linked_visibility(&req, pocketbase.as_ref()).await?;
+    let (journal_entries, total_count) = match &vis {
+        Some(vis) => {
+            let entries =
+                queries::list_journal_entries_visible(&pool, vis, Some(per_page), Some(offset))
+                    .await
+                    .map_err(actix_web::error::ErrorInternalServerError)?;
+            let count = queries::count_journal_entries_visible(&pool, vis)
+                .await
+                .map_err(actix_web::error::ErrorInternalServerError)?;
+            (entries, count)
+        }
+        None => {
+            let entries = queries::list_journal_entries(&pool, Some(per_page), Some(offset))
+                .await
+                .map_err(actix_web::error::ErrorInternalServerError)?;
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM journal_entries")
+                .fetch_one(&**pool)
+                .await
+                .map_err(actix_web::error::ErrorInternalServerError)?;
+            (entries, count)
+        }
+    };
     let total_pages = ((total_count as f64) / (per_page as f64)).ceil() as i32;
 
     let body = ProfileTemplate {
@@ -2135,11 +2166,24 @@ pub struct GenerateScheduleForm {
 
 pub async fn schedule_list(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    let events = queries::list_schedule_events(&pool)
+    let vis = permissions::linked_visibility(&req, pocketbase.as_ref()).await?;
+    let mut events = queries::list_schedule_events(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    if let Some(vis) = vis {
+        let stage_songs = queries::stage_song_map(&pool)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        for event in &mut events {
+            event
+                .items
+                .retain(|item| vis.schedule_item_visible(item, &stage_songs));
+        }
+    }
     let body = ScheduleTemplate {
         events,
         csrf_token: _csrf.0,
@@ -2193,10 +2237,25 @@ pub async fn schedule_event_delete(
 // ICS export
 // ---------------------------------------------------------------------------
 
-pub async fn schedule_ics_export(pool: web::Data<SqlitePool>) -> actix_web::Result<HttpResponse> {
-    let events = queries::list_schedule_events(&pool)
+pub async fn schedule_ics_export(
+    pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
+) -> actix_web::Result<HttpResponse> {
+    let vis = permissions::linked_visibility(&req, pocketbase.as_ref()).await?;
+    let mut events = queries::list_schedule_events(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    if let Some(vis) = vis {
+        let stage_songs = queries::stage_song_map(&pool)
+            .await
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+        for event in &mut events {
+            event
+                .items
+                .retain(|item| vis.schedule_item_visible(item, &stage_songs));
+        }
+    }
 
     let mut ics = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//PersonalMusicBrowser//EN\r\nCALSCALE:GREGORIAN\r\n");
 
@@ -2516,6 +2575,8 @@ pub struct WorkflowRequest {
 
 pub async fn workflows_enqueue(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
     body: web::Json<WorkflowRequest>,
 ) -> actix_web::Result<HttpResponse> {
@@ -2534,6 +2595,14 @@ pub async fn workflows_enqueue(
     let operation = Operation::parse(&body.operation).ok_or_else(|| {
         actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
     })?;
+
+    permissions::authorize_workflow_target(
+        &req,
+        pocketbase.as_ref(),
+        &target_type,
+        &body.target_id_or_path,
+    )
+    .await?;
 
     let (resolved_paths, output_dir) =
         resolve_paths(&pool, &target_type, &operation, &body.target_id_or_path).await?;
@@ -3042,6 +3111,8 @@ pub struct WorkflowUploadForm {
 
 pub async fn workflows_enqueue_upload(
     pool: web::Data<sqlx::SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
     MultipartForm(form): MultipartForm<WorkflowUploadForm>,
 ) -> actix_web::Result<HttpResponse> {
@@ -3075,6 +3146,16 @@ pub async fn workflows_enqueue_upload(
             .map_err(actix_web::error::ErrorInternalServerError)?;
         target_id_or_path = dest.to_string_lossy().to_string();
     }
+
+    // Runs after the upload rewrite so a persisted temp file is checked
+    // under its real location (the upload temp dir is always allowed).
+    permissions::authorize_workflow_target(
+        &req,
+        pocketbase.as_ref(),
+        &target_type,
+        &target_id_or_path,
+    )
+    .await?;
 
     let (resolved_paths, output_dir) =
         resolve_paths(&pool, &target_type, &operation, &target_id_or_path).await?;

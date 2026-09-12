@@ -111,6 +111,7 @@ fn app_server(pb_url: &str, token_cache: web::Data<TokenVerifyCache>) -> actix_t
         require_login: true,
         pocketbase_ca_cert: None,
         public_paths: vec!["/login".into(), "/logout".into(), "/csrf-form".into()],
+        workflow_allowed_roots: vec![],
     };
     let pb_client = web::Data::new(PocketBaseClient::new(
         pb_url.to_string(),

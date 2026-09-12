@@ -80,6 +80,7 @@ pub fn test_auth_config(pocketbase_url: String) -> AuthConfig {
         cookie_secure: false,
         require_login: false,
         public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
+        workflow_allowed_roots: vec![],
     }
 }
 
