@@ -40,7 +40,7 @@ use uuid::Uuid;
 use music_browser::acl::{AccessLevel, CreateGroup, CreateShare, ResourceType};
 use music_browser::app;
 use music_browser::auth::{AuthConfig, AuthenticatedUser, JwtMiddleware, TokenVerifyCache};
-use music_browser::jobs::{JobQueue, JobStore};
+use music_browser::jobs::{JobQueue, JobStore, WorkflowJob};
 use music_browser::permissions;
 use music_browser::pocketbase_client::PocketBaseClient;
 
@@ -87,6 +87,15 @@ enum RouteKind {
         body: &'static str,
         mutated: Mutation,
         open_until: Option<&'static str>,
+    },
+    /// Reachable without credentials (`/api/workflows` is a public path for
+    /// the ARA plugin). Anonymous requests are allowed and apply; an
+    /// authenticated non-owner is still denied by the resource ACL.
+    AnonAllowed {
+        seed: Seed,
+        content_type: &'static str,
+        body: &'static str,
+        mutated: Mutation,
     },
 }
 
@@ -657,12 +666,11 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
     MutatingRoute {
         method: "POST",
         path: "/api/workflows",
-        kind: RouteKind::OwnerProtected {
+        kind: RouteKind::AnonAllowed {
             seed: Seed::Owned(ResourceType::LiveSet),
             content_type: JSON,
             body: r#"{"target_type":"live_set","target_id_or_path":"{id}","operation":"repomix"}"#,
             mutated: Mutation::JobEnqueued,
-            open_until: None,
         },
     },
 ];
@@ -846,6 +854,10 @@ struct Harness {
     pb: PocketBaseClient,
     pb_url: String,
     store: JobStore,
+    /// Held so `JobQueue::enqueue`'s channel stays open — the harness runs no
+    /// worker, so a dropped receiver would make enqueue return ChannelClosed
+    /// after the job reaches the store.
+    _job_receiver: tokio::sync::mpsc::Receiver<WorkflowJob>,
     user_a: TestUser,
     user_b: TestUser,
     csrf: CsrfSession,
@@ -881,9 +893,12 @@ async fn start_harness(pb_url: &str) -> (Harness, NamedTempFile) {
     let (pool, tmp) = test_pool().await;
     let pb = PocketBaseClient::new(pb_url.to_string(), reqwest::Client::new());
     let config = auth_config(pb_url);
+    // Matches main.rs: /api/workflows skips CSRF so the ARA plugin can post
+    // without a browser session.
     let csrf_config =
-        CsrfMiddlewareConfig::double_submit_cookie(b"route-coverage-test-csrf-secret-32B");
-    let (queue, _receiver) = JobQueue::new(16);
+        CsrfMiddlewareConfig::double_submit_cookie(b"route-coverage-test-csrf-secret-32B")
+            .with_skip_for(vec!["/api/workflows".to_string()]);
+    let (queue, job_receiver) = JobQueue::new(16);
     let store = queue.store.clone();
 
     let pool_data = web::Data::new(pool.clone());
@@ -929,6 +944,7 @@ async fn start_harness(pb_url: &str) -> (Harness, NamedTempFile) {
             pb,
             pb_url: pb_url.to_string(),
             store,
+            _job_receiver: job_receiver,
             user_a,
             user_b,
             csrf,
@@ -948,7 +964,12 @@ fn auth_config(pocketbase_url: &str) -> AuthConfig {
         cookie_secure: false,
         require_login: true,
         pocketbase_ca_cert: None,
-        public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
+        public_paths: vec![
+            "/login".into(),
+            "/signup".into(),
+            "/logout".into(),
+            "/api/workflows".into(),
+        ],
         workflow_allowed_roots: vec![],
     }
 }
@@ -1439,7 +1460,10 @@ async fn mutating_routes_redirect_unauthenticated_callers() {
 
     let mut failures = Vec::new();
     for route in MUTATING_ROUTES {
-        if matches!(route.kind, RouteKind::Public) {
+        if matches!(
+            route.kind,
+            RouteKind::Public | RouteKind::AnonAllowed { .. }
+        ) {
             continue;
         }
         let path = route.path.replace("{id}", "1");
@@ -1545,6 +1569,64 @@ async fn owner_protected_routes_enforce_ownership() {
 }
 
 // ---------------------------------------------------------------------------
+// Scenario 2b: plugin-open routes (/api/workflows) allow anonymous callers —
+// the ARA plugin carries no credentials — while authenticated non-owners are
+// still denied by the resource ACL.
+// ---------------------------------------------------------------------------
+
+#[actix_web::test]
+async fn plugin_open_routes_allow_anonymous_callers() {
+    let pb_url = require_pocketbase_or_skip!();
+    let (h, _tmp) = start_harness(&pb_url).await;
+
+    let mut failures = Vec::new();
+    for route in MUTATING_ROUTES {
+        let RouteKind::AnonAllowed {
+            seed,
+            content_type,
+            body,
+            mutated,
+        } = route.kind
+        else {
+            continue;
+        };
+
+        let fixture = run_seed(seed, &h).await;
+        let path = interpolate(route.path, &fixture, &h.user_b.id);
+        let request_body = interpolate(body, &fixture, &h.user_b.id);
+        let label = format!("{} {}", route.method, route.path);
+
+        // Authenticated non-owner: the resource ACL still applies.
+        let (status, _) = send(
+            &h,
+            route.method,
+            &path,
+            Some(&h.user_b.token),
+            content_type,
+            &request_body,
+        )
+        .await;
+        let applied = mutation_applied(mutated, &fixture, &h).await;
+        if !is_denied(status) || applied {
+            failures.push(format!(
+                "{label}: user B must be denied — got {status}, mutation applied = {applied}"
+            ));
+        }
+
+        // Anonymous callers (the ARA plugin) are allowed.
+        let (status, _) = send(&h, route.method, &path, None, content_type, &request_body).await;
+        let applied = mutation_applied(mutated, &fixture, &h).await;
+        if is_denied(status) || !applied {
+            failures.push(format!(
+                "{label}: anonymous caller must be allowed — got {status}, \
+                 mutation applied = {applied}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
 // Scenario 3: create/global routes allow any authenticated caller.
 // ---------------------------------------------------------------------------
 
@@ -1636,5 +1718,54 @@ async fn workflow_file_targets_denied_without_allowed_roots() {
         is_denied(status),
         "file target outside WORKFLOW_ALLOWED_ROOTS must be denied even for the owner — got {status}"
     );
+
+    // Anonymous callers may not point at server-side paths either — only
+    // uploads they supply themselves are exempt.
+    let (status, _) = send(&h, "POST", "/api/workflows", None, JSON, &body).await;
+    assert!(
+        is_denied(status),
+        "anonymous file target must be denied — got {status}"
+    );
     assert!(h.store.list().is_empty(), "no job may be enqueued");
+}
+
+// ---------------------------------------------------------------------------
+// The ARA plugin posts an exported wav as multipart/form-data with no
+// credentials at all — the caller provides the file, so no authorization
+// applies and the upload lands under the temp-dir root.
+// ---------------------------------------------------------------------------
+
+#[actix_web::test]
+async fn workflow_uploads_do_not_require_auth() {
+    let pb_url = require_pocketbase_or_skip!();
+    let (h, _tmp) = start_harness(&pb_url).await;
+
+    let body = concat!(
+        "--b\r\nContent-Disposition: form-data; name=\"target_type\"\r\n\r\nfile\r\n",
+        "--b\r\nContent-Disposition: form-data; name=\"target_id_or_path\"\r\n\r\n/daw/host/clip.wav\r\n",
+        "--b\r\nContent-Disposition: form-data; name=\"operation\"\r\n\r\nrepomix\r\n",
+        "--b\r\nContent-Disposition: form-data; name=\"audio_file\"; filename=\"clip.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFFDATA\r\n",
+        "--b--\r\n",
+    );
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/api/workflows",
+        None,
+        "multipart/form-data; boundary=b",
+        body,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "anonymous upload must enqueue a job"
+    );
+    assert!(
+        h.store
+            .list()
+            .iter()
+            .any(|r| r.job.target_id_or_path.contains("pmb_uploads")),
+        "the uploaded file must be persisted under the upload temp dir"
+    );
 }

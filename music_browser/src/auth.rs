@@ -234,8 +234,9 @@ impl AuthConfig {
             );
         }
 
+        // `/api/workflows` stays public: the ARA plugin posts without credentials.
         let public_paths = std::env::var("AUTH_PUBLIC_PATHS")
-            .unwrap_or_else(|_| "/login,/signup,/logout".into())
+            .unwrap_or_else(|_| "/login,/signup,/logout,/api/workflows".into())
             .split(',')
             .map(|s| s.trim().to_string())
             .collect();
@@ -493,6 +494,16 @@ where
                 (None, None)
             };
 
+            // Attach the verified identity before the public-path early
+            // return: partially open routes (e.g. /api/workflows) still
+            // apply their ACLs to callers who present a valid token.
+            if let Some(verified) = verified_token.clone() {
+                req.extensions_mut().insert(AuthenticatedUser {
+                    id: verified.user_id.clone(),
+                    token: verified.token.clone(),
+                });
+            }
+
             if is_public_path(req.path(), &config) {
                 let res = service.call(req).await?;
                 return Ok(res);
@@ -504,13 +515,6 @@ where
                     return Err(AuthRedirectError.into());
                 }
                 return Err(ErrorUnauthorized("Unauthorized"));
-            }
-
-            if let Some(verified) = verified_token.clone() {
-                req.extensions_mut().insert(AuthenticatedUser {
-                    id: verified.user_id,
-                    token: verified.token.clone(),
-                });
             }
 
             let existing_id = req.cookie("id").map(|c| c.value().to_string());

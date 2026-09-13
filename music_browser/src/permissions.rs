@@ -299,8 +299,15 @@ pub async fn require_group_manage_or_404(
 
 /// Authorize a `/api/workflows` enqueue request by target.
 ///
+/// `/api/workflows` stays partially open because the ARA plugin carries no
+/// credentials:
 /// - Without an `AuthenticatedUser`, the usual single-tenant rule applies:
-///   allowed when `AUTH_REQUIRE_LOGIN=false`, `NotAuthenticated` otherwise.
+///   allowed when `AUTH_REQUIRE_LOGIN=false`. With login required, anonymous
+///   callers may still enqueue `song`/`live_set` targets and uploads they
+///   supplied themselves (`caller_supplied` — the upload handler persists
+///   the bytes under the temp dir before calling here). An anonymous
+///   `file`/`directory` path is denied: it would name a local file the
+///   caller never provided.
 /// - `song`/`live_set` targets require edit access on the parsed id
 ///   (delegates to `require_edit_access_or_401`, including its skip
 ///   semantics for a missing PocketBase client or ACL collections).
@@ -314,10 +321,19 @@ pub async fn authorize_workflow_target(
     pocketbase: Option<&web::Data<PocketBaseClient>>,
     target_type: &TargetType,
     target_id_or_path: &str,
+    caller_supplied: bool,
 ) -> Result<(), PermissionError> {
-    require_authenticated_or_401(req)?;
     if authenticated_user(req).is_none() {
-        return Ok(());
+        if !login_required(req) {
+            return Ok(());
+        }
+        let plugin_open =
+            caller_supplied || matches!(target_type, TargetType::Song | TargetType::LiveSet);
+        return if plugin_open {
+            Ok(())
+        } else {
+            Err(PermissionError::NotAuthenticated)
+        };
     }
 
     match target_type {
