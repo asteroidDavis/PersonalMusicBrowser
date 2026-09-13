@@ -30,6 +30,7 @@
     <div class="goal-card {% if goal.completed %}goal-completed{% endif %}" data-goal-title="{{ goal.title }}" data-goal-completed="{% if goal.completed %}1{% else %}0{% endif %}">
         <div class="goal-card-main">
             <form method="post" action="/goals/{{ goal.id }}/toggle" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn-check" title="Toggle completion">
                     {% if goal.completed %}✅{% else %}⬜{% endif %}
                 </button>

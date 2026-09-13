@@ -66,6 +66,7 @@
                 <td>
                     <form method="post" action="/sets/songs/{{ ls.id }}/remove" style="margin:0"
                           onsubmit="return confirm('Remove this song from the set?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-danger btn-sm">✕</button>
                     </form>
                 </td>
@@ -80,6 +81,7 @@
     <details style="margin-top:.75rem;">
         <summary style="cursor:pointer;color:var(--accent);">+ Add song to set</summary>
         <form method="post" action="/sets/{{ set.id }}/songs" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;align-items:end;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
                 Song
                 <select name="song_id" required>

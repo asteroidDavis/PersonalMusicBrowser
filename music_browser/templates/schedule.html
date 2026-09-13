@@ -11,6 +11,7 @@
 
 <div id="gen-form" style="display:none; margin-bottom:1.5rem;">
     <form method="post" action="/schedule/generate" class="form-card" style="max-width:400px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="form-group">
             <label for="start_date">Start Date</label>
             <input type="date" id="start_date" name="start_date" required>
