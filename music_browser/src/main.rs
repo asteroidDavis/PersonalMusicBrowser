@@ -59,7 +59,10 @@ async fn main() -> std::io::Result<()> {
             http_only: false,
             same_site,
         })
-        .with_secure(cookie_secure);
+        .with_secure(cookie_secure)
+        // The ARA plugin posts without a browser session, so CSRF checks
+        // cannot apply to the workflow enqueue API.
+        .with_skip_for(vec!["/api/workflows".to_string()]);
 
     if csrf_secret == "change-me-to-a-secure-random-32-byte-secret" {
         log::warn!(

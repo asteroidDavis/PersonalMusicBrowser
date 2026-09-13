@@ -2603,6 +2603,7 @@ pub async fn workflows_enqueue(
         pocketbase.as_ref(),
         &target_type,
         &body.target_id_or_path,
+        false,
     )
     .await?;
 
@@ -3137,6 +3138,7 @@ pub async fn workflows_enqueue_upload(
     })?;
 
     let mut target_id_or_path = form.target_id_or_path.into_inner();
+    let caller_supplied = form.audio_file.is_some();
 
     if let Some(file) = form.audio_file {
         let temp_dir = std::env::temp_dir().join("pmb_uploads");
@@ -3156,6 +3158,7 @@ pub async fn workflows_enqueue_upload(
         pocketbase.as_ref(),
         &target_type,
         &target_id_or_path,
+        caller_supplied,
     )
     .await?;
 
