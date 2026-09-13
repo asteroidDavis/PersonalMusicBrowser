@@ -662,7 +662,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
             content_type: JSON,
             body: r#"{"target_type":"live_set","target_id_or_path":"{id}","operation":"repomix"}"#,
             mutated: Mutation::JobEnqueued,
-            open_until: Some("PR 8"),
+            open_until: None,
         },
     },
 ];
@@ -949,6 +949,7 @@ fn auth_config(pocketbase_url: &str) -> AuthConfig {
         require_login: true,
         pocketbase_ca_cert: None,
         public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
+        workflow_allowed_roots: vec![],
     }
 }
 
@@ -1604,4 +1605,36 @@ async fn create_and_global_routes_allow_authenticated_users() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// /api/workflows filesystem targets: with auth on and WORKFLOW_ALLOWED_ROOTS
+// unset (this harness), file/directory targets are denied for everyone —
+// including the owner — because nothing scopes the subprocess to safe paths.
+// ---------------------------------------------------------------------------
+
+#[actix_web::test]
+async fn workflow_file_targets_denied_without_allowed_roots() {
+    let pb_url = require_pocketbase_or_skip!();
+    let (h, _tmp) = start_harness(&pb_url).await;
+
+    let real_file = NamedTempFile::new().expect("temp file");
+    let body = format!(
+        r#"{{"target_type":"file","target_id_or_path":"{}","operation":"repomix"}}"#,
+        real_file.path().display()
+    );
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/api/workflows",
+        Some(&h.user_a.token),
+        JSON,
+        &body,
+    )
+    .await;
+    assert!(
+        is_denied(status),
+        "file target outside WORKFLOW_ALLOWED_ROOTS must be denied even for the owner — got {status}"
+    );
+    assert!(h.store.list().is_empty(), "no job may be enqueued");
 }

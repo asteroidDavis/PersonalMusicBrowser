@@ -80,7 +80,7 @@
                 <td class="status-cell">
                     <form method="post" action="/production/stages/{{ stage.id }}/status" style="display:inline;margin:0">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <select onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
+                        <select name="status" onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
                             <option value="not_started" {% if stage.status_str == "not_started" %}selected{% endif %}>⬜ Not Started</option>
                             <option value="skipped" {% if stage.status_str == "skipped" %}selected{% endif %}>🚫 Skipped</option>
                             <option value="in_progress" {% if stage.status_str == "in_progress" %}selected{% endif %}>🔄 In Progress</option>
@@ -96,7 +96,7 @@
                         <span class="step-chip" title="{{ step.name }}{% if !step.instrument_name.is_empty() %} ({{ step.instrument_name }}){% endif %}{% if !step.notes.is_empty() %} — {{ step.notes }}{% endif %}">
                             <form method="post" action="/production/steps/{{ step.id }}/status" style="display:inline;margin:0">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <select onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
+                                <select name="status" onchange="this.form.submit()" style="font-size:.7rem;padding:.1rem .2rem;border:1px solid #444;background:#222;color:#fff;border-radius:3px;">
                                     <option value="todo" {% if step.status_str == "todo" %}selected{% endif %}>⬜</option>
                                     <option value="in_progress" {% if step.status_str == "in_progress" %}selected{% endif %}>🔄</option>
                                     <option value="complete" {% if step.status_str == "complete" %}selected{% endif %}>✅</option>

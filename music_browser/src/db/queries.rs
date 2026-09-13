@@ -2289,6 +2289,123 @@ pub async fn remove_song_from_set(pool: &SqlitePool, id: i64) -> Result<(), sqlx
 // Journal entries — horizontal tracking of completions
 // ============================================================================
 
+/// `production_stages.id` → owning `songs.id`, for resolving stage-linked
+/// schedule items to the song that carries the access control.
+pub async fn stage_song_map(
+    pool: &SqlitePool,
+) -> Result<std::collections::HashMap<i64, i64>, sqlx::Error> {
+    let rows: Vec<(i64, i64)> = sqlx::query_as("SELECT id, song_id FROM production_stages")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().collect())
+}
+
+fn sql_id_in(column: &str, ids: &std::collections::HashSet<i64>) -> String {
+    if ids.is_empty() {
+        // Sentinel that matches nothing (ids are positive).
+        format!("{column} IN (-1)")
+    } else {
+        let list: Vec<String> = ids.iter().map(i64::to_string).collect();
+        format!("{column} IN ({})", list.join(","))
+    }
+}
+
+/// WHERE fragment restricting journal entries to rows whose linked
+/// resources the caller can access: `goal` entries need the goal;
+/// `schedule_item` entries need every reference on the linked item
+/// (song/exercise/instrument/stage→song) to be accessible.
+fn journal_visibility_where(vis: &crate::permissions::LinkedVisibility) -> String {
+    format!(
+        "((je.entry_type = 'goal' AND {}) \
+         OR (je.entry_type = 'schedule_item' AND EXISTS ( \
+           SELECT 1 FROM schedule_items si2 WHERE si2.id = je.schedule_item_id \
+             AND (si2.song_id IS NULL OR {}) \
+             AND (si2.exercise_id IS NULL OR {}) \
+             AND (si2.instrument_id IS NULL OR {}) \
+             AND (si2.stage_id IS NULL OR si2.stage_id IN ( \
+               SELECT id FROM production_stages WHERE {})))\
+         ))",
+        sql_id_in("je.goal_id", &vis.goals),
+        sql_id_in("si2.song_id", &vis.songs),
+        sql_id_in("si2.exercise_id", &vis.exercises),
+        sql_id_in("si2.instrument_id", &vis.instruments),
+        sql_id_in("song_id", &vis.songs),
+    )
+}
+
+const JOURNAL_ENTRY_SELECT: &str = "SELECT
+        je.id,
+        je.entry_date,
+        je.entry_type,
+        je.schedule_item_id,
+        je.goal_id,
+        je.notes,
+        je.created_at,
+        COALESCE(si.title, '') as schedule_item_title,
+        COALESCE(s.title, '') as schedule_item_song_title,
+        COALESCE(pe.name, '') as schedule_item_exercise_name,
+        COALESCE(g.title, '') as goal_title
+    FROM journal_entries je
+    LEFT JOIN schedule_items si ON je.schedule_item_id = si.id
+    LEFT JOIN songs s ON si.song_id = s.id
+    LEFT JOIN practice_exercises pe ON si.exercise_id = pe.id
+    LEFT JOIN goals g ON je.goal_id = g.id";
+
+fn journal_entry_from_row(r: &sqlx::sqlite::SqliteRow) -> JournalEntry {
+    use sqlx::Row;
+    JournalEntry {
+        id: r.get("id"),
+        entry_date: r.get("entry_date"),
+        entry_type: r.get("entry_type"),
+        schedule_item_id: r.get("schedule_item_id"),
+        goal_id: r.get("goal_id"),
+        notes: r.get("notes"),
+        created_at: r.get("created_at"),
+        schedule_item_title: r.get("schedule_item_title"),
+        schedule_item_song_title: r.get("schedule_item_song_title"),
+        schedule_item_exercise_name: r.get("schedule_item_exercise_name"),
+        goal_title: r.get("goal_title"),
+    }
+}
+
+/// Access-filtered journal listing used by the profile view — same shape
+/// and ordering as `list_journal_entries`, with pagination applied after
+/// the visibility filter so page counts stay accurate.
+pub async fn list_journal_entries_visible(
+    pool: &SqlitePool,
+    vis: &crate::permissions::LinkedVisibility,
+    limit: Option<i32>,
+    offset: Option<i32>,
+) -> Result<Vec<JournalEntry>, sqlx::Error> {
+    let limit_val = limit.unwrap_or(100);
+    let offset_val = offset.unwrap_or(0);
+    let sql = format!(
+        "{JOURNAL_ENTRY_SELECT} WHERE {} ORDER BY je.entry_date DESC, je.created_at DESC \
+         LIMIT ? OFFSET ?",
+        journal_visibility_where(vis)
+    );
+    let rows = sqlx::query(&sql)
+        .bind(limit_val)
+        .bind(offset_val)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows.iter().map(journal_entry_from_row).collect())
+}
+
+/// Count of journal entries visible under `vis` — pairs with
+/// `list_journal_entries_visible` for pagination.
+pub async fn count_journal_entries_visible(
+    pool: &SqlitePool,
+    vis: &crate::permissions::LinkedVisibility,
+) -> Result<i64, sqlx::Error> {
+    let sql = format!(
+        "SELECT COUNT(*) FROM journal_entries je WHERE {}",
+        journal_visibility_where(vis)
+    );
+    sqlx::query_scalar(&sql).fetch_one(pool).await
+}
+
 pub async fn list_journal_entries(
     pool: &SqlitePool,
     limit: Option<i32>,

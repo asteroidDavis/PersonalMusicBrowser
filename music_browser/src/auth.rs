@@ -70,6 +70,11 @@ pub struct AuthConfig {
     pub require_login: bool,
     pub pocketbase_ca_cert: Option<String>,
     pub public_paths: Vec<String>,
+    /// Interim filesystem scoping for `/api/workflows` `file`/`directory`
+    /// targets (`WORKFLOW_ALLOWED_ROOTS`, comma-separated absolute paths).
+    /// When `require_login` is on and this list is empty, such targets are
+    /// rejected — the job subprocess would otherwise touch arbitrary paths.
+    pub workflow_allowed_roots: Vec<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -235,6 +240,14 @@ impl AuthConfig {
             .map(|s| s.trim().to_string())
             .collect();
 
+        let workflow_allowed_roots = std::env::var("WORKFLOW_ALLOWED_ROOTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect();
+
         Self {
             pocketbase_url,
             cookie_secure,
@@ -243,6 +256,7 @@ impl AuthConfig {
                 .unwrap_or(false),
             pocketbase_ca_cert: std::env::var("POCKETBASE_CA_CERT").ok(),
             public_paths,
+            workflow_allowed_roots,
         }
     }
 
@@ -846,6 +860,7 @@ mod tests {
             require_login: true,
             pocketbase_ca_cert: None,
             public_paths: vec!["/login".into(), "/signup".into(), "/logout".into()],
+            workflow_allowed_roots: vec![],
         }
     }
 
@@ -884,6 +899,7 @@ mod tests {
             require_login: true,
             pocketbase_ca_cert: None,
             public_paths: vec!["/login".into()],
+            workflow_allowed_roots: vec![],
         };
         assert!(config.is_insecure());
     }

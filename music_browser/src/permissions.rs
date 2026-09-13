@@ -7,8 +7,11 @@ use std::rc::Rc;
 use thiserror::Error;
 use uuid::Uuid;
 
+use std::path::Path;
+
 use crate::acl::{AccessLevel, CreateShare, GroupMember, GroupShare, ResourceType, Share};
 use crate::auth::{AuthConfig, AuthenticatedUser};
+use crate::jobs::TargetType;
 use crate::pocketbase_client::{PocketBaseClient, PocketBaseClientError};
 
 #[derive(Debug, Error)]
@@ -294,6 +297,68 @@ pub async fn require_group_manage_or_404(
     }
 }
 
+/// Authorize a `/api/workflows` enqueue request by target.
+///
+/// - Without an `AuthenticatedUser`, the usual single-tenant rule applies:
+///   allowed when `AUTH_REQUIRE_LOGIN=false`, `NotAuthenticated` otherwise.
+/// - `song`/`live_set` targets require edit access on the parsed id
+///   (delegates to `require_edit_access_or_401`, including its skip
+///   semantics for a missing PocketBase client or ACL collections).
+/// - `file`/`directory` targets require the canonicalized path to live
+///   under a `WORKFLOW_ALLOWED_ROOTS` entry (or the upload temp dir, which
+///   the upload handler owns). An authenticated deployment with no roots
+///   configured denies them — the job subprocess would otherwise run
+///   against arbitrary filesystem paths.
+pub async fn authorize_workflow_target(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+    target_type: &TargetType,
+    target_id_or_path: &str,
+) -> Result<(), PermissionError> {
+    require_authenticated_or_401(req)?;
+    if authenticated_user(req).is_none() {
+        return Ok(());
+    }
+
+    match target_type {
+        TargetType::Song | TargetType::LiveSet => {
+            let resource_type = match target_type {
+                TargetType::Song => ResourceType::Song,
+                _ => ResourceType::LiveSet,
+            };
+            let id = target_id_or_path
+                .parse::<i64>()
+                .map_err(|_| PermissionError::NotFound)?;
+            require_edit_access_or_401(req, pocketbase, resource_type, id).await
+        }
+        TargetType::File | TargetType::Directory => {
+            let mut roots: Vec<std::path::PathBuf> = req
+                .app_data::<web::Data<AuthConfig>>()
+                .map(|config| config.workflow_allowed_roots.clone())
+                .unwrap_or_default();
+            // The upload handler persists audio under this directory itself.
+            roots.push(std::env::temp_dir().join("pmb_uploads"));
+            if path_under_any_root(target_id_or_path, &roots) {
+                Ok(())
+            } else {
+                Err(PermissionError::NotFound)
+            }
+        }
+    }
+}
+
+/// Whether `path` (canonicalized) lives inside one of `roots`
+/// (canonicalized when possible, compared verbatim otherwise).
+fn path_under_any_root(path: &str, roots: &[std::path::PathBuf]) -> bool {
+    let Ok(canonical) = Path::new(path).canonicalize() else {
+        return false;
+    };
+    roots.iter().any(|root| {
+        let root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        canonical.starts_with(&root)
+    })
+}
+
 /// Whether `user` may manage `group_id`: `owner_id` on the group record, or
 /// an `owner`/`admin` membership. `NotFound` when the group record itself
 /// does not resolve.
@@ -356,6 +421,93 @@ pub async fn list_visibility(
         }
         Err(err) => Err(err),
     }
+}
+
+/// Resource-type visibility for views that render rows *linked to*
+/// shareable resources — the practice schedule (`schedule_items` may carry
+/// song/exercise/instrument/stage references) and the journal (`goal` or
+/// `schedule_item` references). `None` from `linked_visibility` means
+/// unfiltered, under the same skip semantics as `list_visibility`.
+pub struct LinkedVisibility {
+    pub songs: Rc<HashSet<i64>>,
+    pub exercises: Rc<HashSet<i64>>,
+    pub instruments: Rc<HashSet<i64>>,
+    pub goals: Rc<HashSet<i64>>,
+}
+
+impl LinkedVisibility {
+    /// Whether an optional resource reference is accessible. `None`
+    /// references pass — the row's own title/notes carry no resource data.
+    fn ref_visible(set: &HashSet<i64>, id: Option<i64>) -> bool {
+        id.is_none_or(|i| set.contains(&i))
+    }
+
+    /// Whether a schedule item may be shown: every resource it references
+    /// must be accessible. `stage_songs` maps `production_stages.id` to the
+    /// owning `songs.id`; a stage with no resolvable parent hides the item.
+    pub fn schedule_item_visible(
+        &self,
+        item: &crate::db::models::ScheduleItem,
+        stage_songs: &HashMap<i64, i64>,
+    ) -> bool {
+        Self::ref_visible(&self.songs, item.song_id)
+            && Self::ref_visible(&self.exercises, item.exercise_id)
+            && Self::ref_visible(&self.instruments, item.instrument_id)
+            && match item.stage_id {
+                None => true,
+                Some(stage_id) => stage_songs
+                    .get(&stage_id)
+                    .is_some_and(|song_id| self.songs.contains(song_id)),
+            }
+    }
+}
+
+/// Compute `LinkedVisibility` for the request's `AuthenticatedUser`.
+/// - No user + `AUTH_REQUIRE_LOGIN=false` → `Ok(None)` (unfiltered).
+/// - No user + login required → `NotAuthenticated` (fail closed).
+/// - Missing PB client or missing ACL collections → `Ok(None)` with a
+///   warning, matching `list_visibility`.
+pub async fn linked_visibility(
+    req: &HttpRequest,
+    pocketbase: Option<&web::Data<PocketBaseClient>>,
+) -> Result<Option<Rc<LinkedVisibility>>, PermissionError> {
+    let Some(user) = authenticated_user(req) else {
+        return if login_required(req) {
+            Err(PermissionError::NotAuthenticated)
+        } else {
+            Ok(None)
+        };
+    };
+    let Some(pocketbase) = pocketbase.map(|d| d.get_ref()) else {
+        warn!(
+            "[ACL_LIST_SKIPPED] PocketBase client missing for linked_visibility user_id={}",
+            user.id
+        );
+        return Ok(None);
+    };
+    // Each call is request-memoized; MissingAclCollections degrades the
+    // whole view to unfiltered, matching list_visibility.
+    let (songs, exercises, instruments, goals) = match (
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Song).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::PracticeExercise).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Instrument).await,
+        accessible_resource_ids(req, pocketbase, &user, ResourceType::Goal).await,
+    ) {
+        (Err(PermissionError::MissingAclCollections), _, _, _)
+        | (_, Err(PermissionError::MissingAclCollections), _, _)
+        | (_, _, Err(PermissionError::MissingAclCollections), _)
+        | (_, _, _, Err(PermissionError::MissingAclCollections)) => return Ok(None),
+        (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => {
+            return Err(e)
+        }
+        (Ok(s), Ok(e), Ok(i), Ok(g)) => (s, e, i, g),
+    };
+    Ok(Some(Rc::new(LinkedVisibility {
+        songs,
+        exercises,
+        instruments,
+        goals,
+    })))
 }
 
 /// Retain only rows whose `id` is in `visible`, when `visible` is
@@ -699,6 +851,7 @@ mod tests {
             require_login,
             pocketbase_ca_cert: None,
             public_paths: vec![],
+            workflow_allowed_roots: vec![],
         }
     }
 
