@@ -2173,9 +2173,13 @@ pub async fn schedule_list(
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     let vis = permissions::linked_visibility(&req, pocketbase.as_ref()).await?;
+    let visible_events =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::ScheduleEvent)
+            .await?;
     let mut events = queries::list_schedule_events(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible_events, &mut events, |e| e.id);
     if let Some(vis) = vis {
         let stage_songs = queries::stage_song_map(&pool)
             .await
@@ -2197,13 +2201,25 @@ pub async fn schedule_list(
 
 pub async fn schedule_generate(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     form: QsForm<GenerateScheduleForm>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
+    permissions::require_authenticated_or_401(&req)?;
     let f = form.0;
-    queries::generate_schedule(&pool, &f.start_date, f.num_blocks)
+    let event_ids = queries::generate_schedule(&pool, &f.start_date, f.num_blocks)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    for event_id in event_ids {
+        permissions::grant_creator_admin_share_if_authenticated(
+            &req,
+            pocketbase.as_ref(),
+            ResourceType::ScheduleEvent,
+            event_id,
+        )
+        .await?;
+    }
     Ok(HttpResponse::SeeOther()
         .insert_header(("Location", "/schedule"))
         .finish())
@@ -2211,10 +2227,24 @@ pub async fn schedule_generate(
 
 pub async fn schedule_item_toggle(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::toggle_schedule_item(&pool, path.into_inner())
+    let item_id = path.into_inner();
+    let event_id = queries::schedule_item_event_id(&pool, item_id)
+        .await
+        .map_err(actix_web::error::ErrorInternalServerError)?
+        .ok_or_else(|| actix_web::error::ErrorNotFound("Schedule item not found"))?;
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::ScheduleEvent,
+        event_id,
+    )
+    .await?;
+    queries::toggle_schedule_item(&pool, item_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -2224,10 +2254,20 @@ pub async fn schedule_item_toggle(
 
 pub async fn schedule_event_delete(
     pool: web::Data<SqlitePool>,
+    req: HttpRequest,
+    pocketbase: Option<web::Data<PocketBaseClient>>,
     path: web::Path<i64>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
-    queries::delete_schedule_event(&pool, path.into_inner())
+    let event_id = path.into_inner();
+    permissions::require_edit_access_or_401(
+        &req,
+        pocketbase.as_ref(),
+        ResourceType::ScheduleEvent,
+        event_id,
+    )
+    .await?;
+    queries::delete_schedule_event(&pool, event_id)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(HttpResponse::SeeOther()
@@ -2245,9 +2285,13 @@ pub async fn schedule_ics_export(
     pocketbase: Option<web::Data<PocketBaseClient>>,
 ) -> actix_web::Result<HttpResponse> {
     let vis = permissions::linked_visibility(&req, pocketbase.as_ref()).await?;
+    let visible_events =
+        permissions::list_visibility(&req, pocketbase.as_ref(), ResourceType::ScheduleEvent)
+            .await?;
     let mut events = queries::list_schedule_events(&pool)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
+    permissions::retain_visible(&visible_events, &mut events, |e| e.id);
     if let Some(vis) = vis {
         let stage_songs = queries::stage_song_map(&pool)
             .await

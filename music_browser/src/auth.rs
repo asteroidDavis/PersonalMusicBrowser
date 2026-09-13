@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use actix_csrf_middleware::CsrfToken;
+use actix_csrf_middleware::{
+    rotate_csrf_after_login, rotate_csrf_after_logout, CsrfMiddlewareConfig, CsrfToken,
+};
 
 // Security constants
 const MIN_PASSWORD_LENGTH: usize = 12;
@@ -707,6 +709,7 @@ fn signup_error(message: &str, csrf_token: String) -> actix_web::Result<HttpResp
 }
 
 pub async fn login_submit(
+    req: HttpRequest,
     form: web::Form<LoginRequest>,
     csrf: CsrfToken,
     config: web::Data<AuthConfig>,
@@ -769,6 +772,15 @@ pub async fn login_submit(
                         .same_site(actix_web::cookie::SameSite::Lax)
                         .finish();
                     resp.cookie(id_cookie);
+
+                    // Bind the authorized CSRF token cookie to the new user
+                    // id and drop the anonymous/pre-session pair. Without this
+                    // a stale authorized cookie (e.g. left over from a previous
+                    // session) keeps being echoed into forms and every later
+                    // POST fails with csrf_token_invalid.
+                    if let Some(csrf_config) = req.app_data::<CsrfMiddlewareConfig>() {
+                        rotate_csrf_after_login(id, &req, &mut resp, csrf_config)?;
+                    }
                 }
 
                 return Ok(resp.finish());
@@ -845,12 +857,19 @@ pub async fn logout(
     id_cookie.set_secure(config.cookie_secure);
     id_cookie.set_same_site(actix_web::cookie::SameSite::Lax);
 
-    Ok(HttpResponse::SeeOther()
-        .append_header(("Location", "/login"))
-        .cookie(cookie)
-        .cookie(flag_cookie)
-        .cookie(id_cookie)
-        .finish())
+    let mut resp = HttpResponse::SeeOther();
+    resp.append_header(("Location", "/login"));
+    resp.cookie(cookie).cookie(flag_cookie).cookie(id_cookie);
+
+    // Expire the CSRF session-id (`id`), authorized/anonymous token, and
+    // pre-session cookies, and mark the request so the middleware does not
+    // re-issue a rotated authorized token bound to the outgoing user id —
+    // that stale cookie would make every later POST fail validation.
+    if let Some(csrf_config) = req.app_data::<CsrfMiddlewareConfig>() {
+        rotate_csrf_after_logout(&req, &mut resp, csrf_config)?;
+    }
+
+    Ok(resp.finish())
 }
 
 #[cfg(test)]

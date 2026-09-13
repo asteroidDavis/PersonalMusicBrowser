@@ -52,6 +52,7 @@ pub enum ResourceType {
     PracticeExercise,
     Goal,
     LiveSet,
+    ScheduleEvent,
     Job,
 }
 
@@ -74,6 +75,7 @@ impl ResourceType {
             ResourceType::PracticeExercise => "practice_exercise",
             ResourceType::Goal => "goal",
             ResourceType::LiveSet => "live_set",
+            ResourceType::ScheduleEvent => "schedule_event",
             ResourceType::Job => "job",
         }
     }
@@ -97,6 +99,7 @@ impl ResourceType {
             ResourceType::PracticeExercise,
             ResourceType::Goal,
             ResourceType::LiveSet,
+            ResourceType::ScheduleEvent,
             ResourceType::Job,
         ]
         .into_iter()

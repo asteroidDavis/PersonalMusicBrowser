@@ -68,9 +68,10 @@ enum RouteKind {
         content_type: &'static str,
         body: &'static str,
     },
-    /// Mutates global single-tenant state (journal/schedule/profile). These
-    /// have no per-resource ownership today; an authenticated caller is
-    /// allowed — per-user scoping lands when profiles exist.
+    /// Mutates global single-tenant state (journal/profile) or creates
+    /// caller-owned schedule blocks. These have no per-resource ownership
+    /// check on existing rows; an authenticated caller is allowed —
+    /// per-user scoping for journal/profile lands when profiles exist.
     LoginOnly {
         seed: Seed,
         content_type: &'static str,
@@ -125,9 +126,9 @@ enum Seed {
     OwnedGroupAndSong,
     /// A global `journal_entries` row. `{id}` = entry id.
     JournalEntry,
-    /// A global `schedule_items` row. `{id}` = item id.
+    /// A `schedule_items` row under an owned event. `{id}` = item id.
     ScheduleItem,
-    /// A global `schedule_events` row. `{id}` = event id.
+    /// An owned `schedule_events` row. `{id}` = event id.
     ScheduleEvent,
 }
 
@@ -582,7 +583,7 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
     MutatingRoute {
         method: "POST",
         path: "/schedule/items/{id}/toggle",
-        kind: RouteKind::LoginOnly {
+        kind: RouteKind::OwnerProtected {
             seed: Seed::ScheduleItem,
             content_type: FORM,
             body: "",
@@ -590,16 +591,18 @@ const MUTATING_ROUTES: &[MutatingRoute] = &[
                 table: "schedule_items",
                 conditions: &[("id", "{id}"), ("completed", "1")],
             },
+            open_until: None,
         },
     },
     MutatingRoute {
         method: "POST",
         path: "/schedule/events/{id}/delete",
-        kind: RouteKind::LoginOnly {
+        kind: RouteKind::OwnerProtected {
             seed: Seed::ScheduleEvent,
             content_type: FORM,
             body: "",
             mutated: Mutation::RowDeleted("schedule_events"),
+            open_until: None,
         },
     },
     // --- Live sets ---
@@ -1320,6 +1323,7 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
                 &[h.next_id()],
             )
             .await;
+            grant_admin(h, ResourceType::ScheduleEvent, event).await;
             let item = insert_row(
                 &h.pool,
                 "INSERT INTO schedule_items (id, event_id, item_type, title) VALUES (?, ?, 'warmup', 'w')",
@@ -1329,7 +1333,7 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
             Fixture {
                 id: item.to_string(),
                 other: String::new(),
-                shareable: None,
+                shareable: Some((ResourceType::ScheduleEvent, event)),
             }
         }
         Seed::ScheduleEvent => {
@@ -1339,10 +1343,11 @@ async fn run_seed(seed: Seed, h: &Harness) -> Fixture {
                 &[h.next_id()],
             )
             .await;
+            grant_admin(h, ResourceType::ScheduleEvent, event).await;
             Fixture {
                 id: event.to_string(),
                 other: String::new(),
-                shareable: None,
+                shareable: Some((ResourceType::ScheduleEvent, event)),
             }
         }
     }

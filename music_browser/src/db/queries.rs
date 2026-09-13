@@ -1807,6 +1807,18 @@ pub async fn update_schedule_event_status(
     Ok(())
 }
 
+/// The owning `schedule_events.id` for a `schedule_items` row, used by
+/// authorization checks that protect the parent event.
+pub async fn schedule_item_event_id(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT event_id FROM schedule_items WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
 pub async fn delete_schedule_event(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM schedule_items WHERE event_id = ?")
         .bind(id)

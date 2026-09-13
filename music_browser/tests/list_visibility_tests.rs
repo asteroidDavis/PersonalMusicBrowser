@@ -403,9 +403,9 @@ async fn single_tenant_lists_stay_unfiltered() {
     );
 }
 
-/// `/schedule` and `/schedule/export.ics` hide items that reference
-/// resources the caller cannot access; items with no resource references
-/// stay visible (there is no resource data to leak).
+/// `/schedule` and `/schedule/export.ics` show only events the caller can
+/// access, and within a visible event hide items that reference resources
+/// the caller cannot access.
 #[actix_web::test]
 async fn schedule_list_filters_items_by_linked_resource_access() {
     let Some(pb_url) = pb_url() else {
@@ -458,6 +458,14 @@ async fn schedule_list_filters_items_by_linked_resource_access() {
     .await;
 
     insert_row(&h.pool, "INSERT INTO schedule_events (id, event_date, title) VALUES (92010, '2030-01-10', 'sched-test-event')", &[]).await;
+    grant(
+        &h,
+        &h.user_a,
+        ResourceType::ScheduleEvent,
+        92010,
+        AccessLevel::Admin,
+    )
+    .await;
     insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, song_id, title) VALUES (92020, 92010, 'song_practice', 92001, 'item-hidden-song')", &[]).await;
     insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, exercise_id, title) VALUES (92021, 92010, 'exercise', 92002, 'item-hidden-exercise')", &[]).await;
     insert_row(&h.pool, "INSERT INTO schedule_items (id, event_id, item_type, instrument_id, title) VALUES (92022, 92010, 'warmup', 92003, 'item-hidden-instrument')", &[]).await;
@@ -480,17 +488,18 @@ async fn schedule_list_filters_items_by_linked_resource_access() {
         let (status, body) = get(&h, path, Some(&h.user_b.token)).await;
         assert_eq!(status, StatusCode::OK, "{path}");
         for marker in [
+            "sched-test-event",
             "item-hidden-song",
             "item-hidden-exercise",
             "item-hidden-instrument",
             "item-hidden-stage",
+            "item-open-warmup",
         ] {
-            assert!(!body.contains(marker), "B must not see {marker} on {path}");
+            assert!(
+                !body.contains(marker),
+                "B must not see {marker} on {path} — the event itself is not shared"
+            );
         }
-        assert!(
-            body.contains("item-open-warmup"),
-            "unreferenced items stay visible on {path}"
-        );
     }
 }
 
