@@ -49,6 +49,7 @@
     <div class="prod-card-actions">
         <a href="/production/songs/{{ entry.song_id }}/stages/new" class="btn btn-sm">+ Stage</a>
         <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-sm" title="Add all 7 standard stages">⚡ Auto Stages</button>
         </form>
         <a href="/production/songs/{{ entry.song_id }}/files/new?return_to=/production" class="btn btn-sm">+ File</a>
@@ -60,6 +61,7 @@
             <a href="/production/songs/{{ entry.song_id }}/stages/new" style="color:var(--accent)">Add stages?</a>
             or
             <form method="post" action="/production/songs/{{ entry.song_id }}/stages/auto" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-sm" style="font-size:.8em">⚡ Auto-add all 7 stages</button>
             </form>
         </div>
