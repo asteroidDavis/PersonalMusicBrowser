@@ -1293,7 +1293,9 @@ pub async fn stage_create(
     queries::create_production_stage(&pool, &input)
         .await
         .map_err(actix_web::error::ErrorInternalServerError)?;
-    Ok(redirect_back(&req, "/production"))
+    Ok(HttpResponse::SeeOther()
+        .insert_header(("Location", "/production"))
+        .finish())
 }
 
 /// Resolve a `production_stages` row's parent song and require edit access
