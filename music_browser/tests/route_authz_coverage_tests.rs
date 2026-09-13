@@ -1719,14 +1719,23 @@ async fn workflow_file_targets_denied_without_allowed_roots() {
         "file target outside WORKFLOW_ALLOWED_ROOTS must be denied even for the owner — got {status}"
     );
 
-    // Anonymous callers may not point at server-side paths either — only
-    // uploads they supply themselves are exempt.
-    let (status, _) = send(&h, "POST", "/api/workflows", None, JSON, &body).await;
-    assert!(
-        is_denied(status),
-        "anonymous file target must be denied — got {status}"
+    // The Rust host's temporary filesystem is intentionally open for this
+    // endpoint: the ARA plugin may need to reference its persisted upload.
+    let temp_body = format!(
+        r#"{{"target_type":"file","target_id_or_path":"{}","operation":"repomix"}}"#,
+        real_file.path().display()
     );
-    assert!(h.store.list().is_empty(), "no job may be enqueued");
+    let (status, _) = send(&h, "POST", "/api/workflows", None, JSON, &temp_body).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "anonymous temp-file target must be allowed — got {status}"
+    );
+    assert_eq!(
+        h.store.list().len(),
+        1,
+        "the temp-file job must be enqueued"
+    );
 }
 
 // ---------------------------------------------------------------------------

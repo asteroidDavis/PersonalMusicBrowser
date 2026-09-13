@@ -303,11 +303,11 @@ pub async fn require_group_manage_or_404(
 /// credentials:
 /// - Without an `AuthenticatedUser`, the usual single-tenant rule applies:
 ///   allowed when `AUTH_REQUIRE_LOGIN=false`. With login required, anonymous
-///   callers may still enqueue `song`/`live_set` targets and uploads they
+///   callers may still enqueue `song`/`live_set` targets, uploads they
 ///   supplied themselves (`caller_supplied` — the upload handler persists
-///   the bytes under the temp dir before calling here). An anonymous
-///   `file`/`directory` path is denied: it would name a local file the
-///   caller never provided.
+///   the bytes under the temp dir before calling here), and paths under the
+///   Rust host's temporary filesystem. Other `file`/`directory` paths are
+///   denied: they would name local files the caller never provided.
 /// - `song`/`live_set` targets require edit access on the parsed id
 ///   (delegates to `require_edit_access_or_401`, including its skip
 ///   semantics for a missing PocketBase client or ACL collections).
@@ -327,8 +327,10 @@ pub async fn authorize_workflow_target(
         if !login_required(req) {
             return Ok(());
         }
-        let plugin_open =
-            caller_supplied || matches!(target_type, TargetType::Song | TargetType::LiveSet);
+        let plugin_open = caller_supplied
+            || matches!(target_type, TargetType::Song | TargetType::LiveSet)
+            || matches!(target_type, TargetType::File | TargetType::Directory)
+                && path_under_any_root(target_id_or_path, &[std::env::temp_dir()]);
         return if plugin_open {
             Ok(())
         } else {

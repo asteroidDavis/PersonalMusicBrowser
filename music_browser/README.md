@@ -137,7 +137,7 @@ cargo run --bin music-browser
 | `POCKETBASE_URL` | `https://127.0.0.1:8090` | PocketBase instance URL for authentication |
 | `AUTH_COOKIE_SECURE` | `false` | Whether auth cookies use the Secure flag (set to false for HTTP-only local dev) |
 | `AUTH_REQUIRE_LOGIN` | `false` | Whether JWT middleware is active (when true, all routes except AUTH_PUBLIC_PATHS require valid tokens) |
-| `AUTH_PUBLIC_PATHS` | `/login,/signup,/logout,/api/workflows` | Comma-separated list of public paths that bypass JWT middleware. `/api/workflows` is public so the ARA plugin can enqueue jobs without credentials (see issue tracker for the plugin-auth follow-up) |
+| `AUTH_PUBLIC_PATHS` | `/login,/signup,/logout,/api/workflows` | Comma-separated list of public paths that bypass JWT middleware. `/api/workflows` is always added so the ARA plugin can enqueue jobs without credentials (see issue tracker for the plugin-auth follow-up) |
 | `POCKETBASE_CA_CERT` | (optional) | Path to custom CA certificate for PocketBase TLS (for self-signed certs) |
 | `CSRF_SECRET` | (required) | Secret key for CSRF token validation (32+ bytes recommended) |
 | `CSRF_COOKIE_SECURE` | `false` | Whether CSRF cookies use the Secure flag (auto-set based on HTTPS_ENABLED) |

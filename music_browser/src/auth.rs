@@ -235,11 +235,15 @@ impl AuthConfig {
         }
 
         // `/api/workflows` stays public: the ARA plugin posts without credentials.
-        let public_paths = std::env::var("AUTH_PUBLIC_PATHS")
-            .unwrap_or_else(|_| "/login,/signup,/logout,/api/workflows".into())
+        let mut public_paths: Vec<String> = std::env::var("AUTH_PUBLIC_PATHS")
+            .unwrap_or_else(|_| "/login,/signup,/logout".into())
             .split(',')
             .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
             .collect();
+        if !public_paths.iter().any(|path| path == "/api/workflows") {
+            public_paths.push("/api/workflows".into());
+        }
 
         let workflow_allowed_roots = std::env::var("WORKFLOW_ALLOWED_ROOTS")
             .unwrap_or_default()
