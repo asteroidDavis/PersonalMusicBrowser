@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
 done
 
 DRIVER_PORT=$(( (RANDOM % 20000) + 40000 ))
-DRIVER_LOG="$(mktemp -t webdriver-log)"
+DRIVER_LOG="$(mktemp -t webdriver-log.XXXXXX)"
 DRIVER_PID=""
 
 cleanup() {
