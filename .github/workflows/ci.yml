@@ -99,6 +99,30 @@ jobs:
           name: timing-rust-test-${{ matrix.rust }}
           path: rust-test-${{ matrix.rust }}.sec
 
+  browser-test:
+    name: Browser test (rust, firefox)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            music_browser/target
+          key: ${{ runner.os }}-cargo-browser-test-${{ hashFiles('music_browser/Cargo.lock') }}
+      - name: cargo test (headless firefox) + timing
+        # ubuntu-latest ships Firefox + geckodriver preinstalled
+        # ($GECKOWEBDRIVER); see tests/practice_open_song_file_tests.rs.
+        run: |
+          START=$(date +%s)
+          music_browser/scripts/run-browser-integration-tests.sh
+          END=$(date +%s)
+          echo $((END - START)) > rust-browser-test.sec
+      - uses: actions/upload-artifact@v4
+        with: { name: timing-rust-browser-test, path: rust-browser-test.sec }
+
   security:
     name: Security Audit (rust)
     runs-on: ubuntu-latest
@@ -208,7 +232,7 @@ jobs:
   summary:
     name: CI timing summary (rust vs c++)
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, test, security, cpp-format, cpp-core-tests]
+    needs: [fmt, clippy, test, browser-test, security, cpp-format, cpp-core-tests]
     if: always()
     steps:
       - uses: actions/download-artifact@v4
