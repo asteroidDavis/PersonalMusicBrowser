@@ -371,6 +371,10 @@ instance and is skipped (with a note) unless `POCKETBASE_TEST_URL` is set. See
 [PocketBase ACL Integration Tests](#pocketbase-acl-integration-tests) below to
 run the full suite, which is what CI and the pre-commit hook do.
 
+Note: `tests/practice_open_song_file_tests.rs` drives a real browser via
+WebDriver and is skipped (with a note) unless `WEBDRIVER_URL` is set. See
+[Browser Link-Opening Tests](#browser-link-opening-tests) below to run it.
+
 ### Run a Single Test (terminal)
 
 ```bash
@@ -409,6 +413,38 @@ It requires a `pocketbase` binary at `pocketbase/pocketbase` or on `PATH`
 (override with `POCKETBASE_BIN`). This is the same script CI
 (`.github/workflows/ci.yml`) and the pre-commit hook use, so `cargo test`
 locally and `git commit` exercise the same coverage.
+
+### Browser Link-Opening Tests
+
+`tests/practice_open_song_file_tests.rs` drives a real, WebDriver-controlled
+browser to click a song's lead sheet link on the Practice page and verify a
+new tab actually opens to that URL (issue #65) — the kind of behavior the
+in-process `actix_web::test` suite can't exercise. Run it with:
+
+```bash
+music_browser/scripts/run-browser-integration-tests.sh              # Firefox, headless (default)
+music_browser/scripts/run-browser-integration-tests.sh --browser safari  # Safari, headed, macOS-only
+```
+
+This script starts the matching WebDriver (`geckodriver` or `safaridriver`)
+on a free local port, exports `WEBDRIVER_URL`/`WEBDRIVER_BROWSER`, runs
+`cargo test --test practice_open_song_file_tests`, and tears the driver
+down on exit.
+
+- **Firefox** (default): needs Firefox + `geckodriver`. Preinstalled on
+  GitHub Actions' `ubuntu-latest` runner (used by CI, see
+  `.github/workflows/ci.yml`'s `browser-test` job) via `$GECKOWEBDRIVER`;
+  locally, `brew install --cask firefox geckodriver` (macOS) or your
+  distro's packages (Linux). Runs headless by default; set
+  `WEBDRIVER_HEADLESS=0` to watch it.
+- **Safari**: macOS-only, no headless mode, needs a one-time setup — Safari
+  > Settings > Advanced > "Show features for web developers", then Safari
+  > Develop menu > "Allow Remote Automation", then `safaridriver --enable`.
+
+This isn't wired into the pre-commit hook (it needs a real browser + driver
+installed, unlike the PocketBase integration tests), so it's opt-in locally;
+CI runs it on every push via Firefox on `ubuntu-latest`. Not yet supported:
+Windows CI (tracked separately).
 
 ### Test Coverage
 
@@ -479,7 +515,8 @@ music_browser/
 │   └── 0002_merge_manual_model.sql  # Merged production model
 ├── scripts/
 │   ├── install-hooks.sh       # Pre-commit hook installer
-│   └── run-pocketbase-integration-tests.sh  # Spins up ephemeral PocketBase, runs cargo test
+│   ├── run-pocketbase-integration-tests.sh  # Spins up ephemeral PocketBase, runs cargo test
+│   └── run-browser-integration-tests.sh     # Starts geckodriver/safaridriver, runs the browser test
 ├── src/
 │   ├── lib.rs                 # Library crate (shared db module)
 │   ├── main.rs                # Launches database pool, jobs workflow, and webserver

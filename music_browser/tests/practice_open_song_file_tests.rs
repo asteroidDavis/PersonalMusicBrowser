@@ -6,17 +6,24 @@
 //! `href`, so it needs a real WebDriver-controlled browser rather than the
 //! in-process `actix_web::test` helpers used elsewhere in this test suite.
 //!
-//! It talks to Safari via `safaridriver` (macOS-only, ships with the OS).
-//! Requires:
-//!   1. Safari > Settings > Advanced > "Show features for web developers".
-//!   2. Safari > Develop menu > "Allow Remote Automation".
-//!   3. `safaridriver --enable` (one-time, needs an admin password).
+//! Supports two browsers, selected via `WEBDRIVER_BROWSER`:
+//!   - `firefox` (default): via `geckodriver`. Runs headless unless
+//!     `WEBDRIVER_HEADLESS=0`. Firefox/geckodriver ship preinstalled on
+//!     GitHub Actions' `ubuntu-latest` and `windows-latest` runners
+//!     (`$GECKOWEBDRIVER`); locally, `brew install --cask firefox
+//!     geckodriver` (macOS) or your distro's packages.
+//!   - `safari`: via `safaridriver` (macOS-only, ships with the OS). Only
+//!     runs headed (Safari has no headless mode). One-time setup:
+//!       1. Safari > Settings > Advanced > "Show features for web developers".
+//!       2. Safari > Develop menu > "Allow Remote Automation".
+//!       3. `safaridriver --enable` (needs an admin password once).
 //!
 //! Run via `music_browser/scripts/run-browser-integration-tests.sh`, which
-//! starts `safaridriver` on a free port and exports `SAFARIDRIVER_URL`. If
-//! that var isn't set (e.g. a plain `cargo test` run, or CI on non-macOS
-//! runners), this test is skipped with a note rather than failing, so it
-//! doesn't block unrelated local development.
+//! starts the right driver on a free port and exports `WEBDRIVER_URL`
+//! (`SAFARIDRIVER_URL` also works, for back-compat with earlier
+//! Safari-only runs). If neither is set (e.g. a plain `cargo test` run),
+//! this test is skipped with a note rather than failing, so it doesn't
+//! block unrelated local development.
 //!
 //! This currently covers only the most basic case from issue #40 (opening a
 //! text-note-style lead sheet link in a new tab); other file/link behaviors
@@ -32,34 +39,81 @@ use sqlx::SqlitePool;
 use std::str::FromStr;
 use std::time::Duration;
 use tempfile::NamedTempFile;
+use thirtyfour::common::capabilities::firefox::FirefoxPreferences;
 use thirtyfour::error::WebDriverError;
-use thirtyfour::{By, DesiredCapabilities, WebDriver, WindowHandle};
+use thirtyfour::{By, Capabilities, DesiredCapabilities, WebDriver, WindowHandle};
 
 /// The lead sheet resource linked from issue #65.
 const LEAD_SHEET_URL: &str =
     "https://1drv.ms/t/c/03c89073c048f55d/IQBd9UjAc5DIIIAD0vEEAAAAASvmkMoh7-qXYpJqjYr8RBw?e=c82Miw";
 
-/// A unique token from `LEAD_SHEET_URL`'s path that OneDrive preserves
-/// through its `1drv.ms` -> `onedrive.live.com` redirect, so we can
-/// recognize we landed on the right document even if the new tab finishes
-/// following that redirect before we inspect its URL.
-const LEAD_SHEET_RESOURCE_TOKEN: &str = "IQBd9UjAc5DIIIAD0vEEAAAAASvmkMoh7-qXYpJqjYr8RBw";
+/// A unique token — the shared folder's id, from `LEAD_SHEET_URL`'s path —
+/// that OneDrive preserves (case-insensitively, under varying parameter
+/// names/shapes depending on the browser) through its `1drv.ms` ->
+/// `onedrive.live.com` redirect, so we can recognize we landed on the right
+/// resource even if the new tab finishes following that redirect before we
+/// inspect its URL.
+const LEAD_SHEET_RESOURCE_TOKEN: &str = "03c89073c048f55d";
 
-/// Returns the WebDriver server URL to test against, or `None` if the caller
-/// should skip (no `safaridriver` instance was set up for this run).
-fn safaridriver_url() -> Option<String> {
-    std::env::var("SAFARIDRIVER_URL").ok()
+/// Which browser/driver to exercise, resolved from `WEBDRIVER_BROWSER`
+/// (`firefox`, the default, or `safari`).
+enum Browser {
+    Firefox,
+    Safari,
 }
 
-/// Skips the current test (with an explanatory message) unless a
-/// `safaridriver` instance is available.
+impl Browser {
+    fn from_env() -> Self {
+        match std::env::var("WEBDRIVER_BROWSER") {
+            Ok(v) if v.eq_ignore_ascii_case("safari") => Browser::Safari,
+            _ => Browser::Firefox,
+        }
+    }
+
+    /// Build this browser's WebDriver capabilities. Firefox runs headless
+    /// unless `WEBDRIVER_HEADLESS=0`, and forces `target="_blank"` links to
+    /// open in a new tab (rather than a new OS window) so tab-counting
+    /// assertions behave the same across platforms/CI images. Safari has no
+    /// headless mode and always opens `target="_blank"` links in a new tab.
+    fn capabilities(&self) -> Capabilities {
+        match self {
+            Browser::Firefox => {
+                let mut caps = DesiredCapabilities::firefox();
+                let headless = std::env::var("WEBDRIVER_HEADLESS").map_or(true, |v| v != "0");
+                if headless {
+                    caps.set_headless().expect("infallible");
+                }
+                let mut prefs = FirefoxPreferences::new();
+                prefs
+                    .set("browser.link.open_newwindow", 3)
+                    .expect("infallible");
+                caps.set_preferences(prefs).expect("infallible");
+                caps.into()
+            }
+            Browser::Safari => DesiredCapabilities::safari().into(),
+        }
+    }
+}
+
+/// Returns the WebDriver server URL to test against, or `None` if the caller
+/// should skip (no WebDriver instance was set up for this run).
+fn webdriver_url() -> Option<String> {
+    // `SAFARIDRIVER_URL` is kept as a back-compat alias from when this test
+    // only supported Safari.
+    std::env::var("WEBDRIVER_URL")
+        .ok()
+        .or_else(|| std::env::var("SAFARIDRIVER_URL").ok())
+}
+
+/// Skips the current test (with an explanatory message) unless a WebDriver
+/// instance is available.
 macro_rules! require_browser_or_skip {
     () => {
-        match safaridriver_url() {
+        match webdriver_url() {
             Some(url) => url,
             None => {
                 eprintln!(
-                    "skipping {}: SAFARIDRIVER_URL is not set. Run via \
+                    "skipping {}: WEBDRIVER_URL is not set. Run via \
                      `music_browser/scripts/run-browser-integration-tests.sh` \
                      to exercise the real-browser link-opening test.",
                     module_path!()
@@ -160,10 +214,12 @@ async fn opening_lead_sheet_from_practice_page_opens_new_tab() {
     let (pool, _tmp_db) = seed_test_db().await;
     let base_url = start_test_server(pool).await;
 
-    let driver = WebDriver::new(driver_url.as_str(), DesiredCapabilities::safari())
+    let browser = Browser::from_env();
+    let driver = WebDriver::new(driver_url.as_str(), browser.capabilities())
         .await
         .expect(
-            "failed to start a Safari WebDriver session — is \
+            "failed to start a WebDriver session — for Firefox, is \
+             geckodriver reachable at WEBDRIVER_URL? For Safari, is \
              `safaridriver --enable` set up, and 'Allow Remote Automation' \
              checked in Safari's Develop menu?",
         );
@@ -210,17 +266,35 @@ async fn run_test(driver: &WebDriver, base_url: &str) -> Result<(), WebDriverErr
     let new_handle = wait_for_new_window(driver, &initial_handles).await?;
     driver.switch_to_window(new_handle).await?;
 
-    // OneDrive's `1drv.ms` short links redirect to `onedrive.live.com`, and
-    // the new tab may already have followed that redirect by the time we
-    // check, so accept either the original short link or the resolved
-    // document (identified by its unique resource token).
-    let new_tab_url = driver.current_url().await?.to_string();
+    // The new tab starts at "about:blank" until navigation completes, so
+    // wait for it to leave that before inspecting the URL. OneDrive's
+    // `1drv.ms` short links then redirect to `onedrive.live.com`, and the
+    // tab may already have followed that redirect (in a browser-dependent
+    // URL shape) by the time we check, so accept either the original short
+    // link or a resolved OneDrive URL carrying the resource's token.
+    let new_tab_url = wait_for_navigation(driver).await?;
     assert!(
-        new_tab_url.starts_with(LEAD_SHEET_URL) || new_tab_url.contains(LEAD_SHEET_RESOURCE_TOKEN),
+        new_tab_url.starts_with(LEAD_SHEET_URL)
+            || new_tab_url
+                .to_lowercase()
+                .contains(LEAD_SHEET_RESOURCE_TOKEN),
         "expected the new tab to navigate to the lead sheet URL, got: {new_tab_url}"
     );
 
     Ok(())
+}
+
+/// Poll the current tab's URL until it navigates away from "about:blank"
+/// (i.e. the browser has started following the clicked link), or time out.
+async fn wait_for_navigation(driver: &WebDriver) -> Result<String, WebDriverError> {
+    for _ in 0..40 {
+        let url = driver.current_url().await?.to_string();
+        if url != "about:blank" {
+            return Ok(url);
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    panic!("timed out waiting for the new tab to navigate away from about:blank");
 }
 
 /// Poll `driver.windows()` until a window handle not present in
