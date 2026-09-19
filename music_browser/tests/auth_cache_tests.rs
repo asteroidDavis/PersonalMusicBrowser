@@ -43,9 +43,16 @@ async fn auth_refresh(counter: web::Data<FakePocketBase>) -> HttpResponse {
     }))
 }
 
+/// Single-page list response matching the real PocketBase shape. Because
+/// `totalPages` is 1, the client's pagination loop issues exactly one
+/// request — pagination only costs extra calls when more pages exist.
 async fn list_shares(counter: web::Data<FakePocketBase>) -> HttpResponse {
     counter.share_list_calls.fetch_add(1, Ordering::SeqCst);
     HttpResponse::Ok().json(json!({
+        "page": 1,
+        "perPage": 200,
+        "totalPages": 1,
+        "totalItems": 1,
         "items": [{
             "id": "share-1",
             "user_id": TEST_USER_ID,
