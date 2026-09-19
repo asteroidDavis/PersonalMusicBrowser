@@ -191,6 +191,50 @@ async fn list_user_shares_returns_shares_granted_to_that_user() {
 }
 
 #[tokio::test]
+async fn list_user_shares_paginates_beyond_default_page_size() {
+    let base_url = require_pocketbase_or_skip!();
+    let client = pocketbase_client(&base_url);
+    let owner = authenticate(&base_url, TEST_USER_1_EMAIL, TEST_USER_1_PASSWORD).await;
+    let grantee = authenticate(&base_url, TEST_USER_2_EMAIL, TEST_USER_2_PASSWORD).await;
+
+    // PocketBase's default list page size is 30; create more shares than
+    // that so the grantee's share list spans multiple pages.
+    let share_count = 35;
+    let mut resource_ids = Vec::new();
+    for _ in 0..share_count {
+        let resource_id = unique_resource_id();
+        client
+            .create_share(
+                &owner.token,
+                &CreateShare {
+                    user_id: grantee.id.clone(),
+                    resource_type: ResourceType::Song.as_str().to_string(),
+                    resource_id: resource_id.clone(),
+                    access_level: AccessLevel::Viewer,
+                    created_by: owner.id.clone(),
+                },
+            )
+            .await
+            .expect("create_share should succeed");
+        resource_ids.push(resource_id);
+    }
+
+    let shares = client
+        .list_user_shares(&grantee.token, &grantee.id)
+        .await
+        .expect("list_user_shares should succeed");
+    for resource_id in &resource_ids {
+        assert!(
+            shares
+                .iter()
+                .any(|s| s.resource_id == *resource_id
+                    && s.resource_type == ResourceType::Song.as_str()),
+            "share for resource_id={resource_id} missing from paginated results"
+        );
+    }
+}
+
+#[tokio::test]
 async fn group_membership_and_group_share_workflow() {
     let base_url = require_pocketbase_or_skip!();
     let client = pocketbase_client(&base_url);

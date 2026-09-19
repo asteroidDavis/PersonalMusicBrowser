@@ -9,6 +9,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 const MAX_ERROR_BODY_LENGTH: usize = 200;
+const LIST_PER_PAGE: u32 = 200;
 
 #[derive(Debug, Error)]
 pub enum PocketBaseClientError {
@@ -49,6 +50,10 @@ pub struct PocketBaseClient {
 #[derive(Debug, Deserialize)]
 struct PocketBaseList<T> {
     items: Vec<T>,
+    // Real PocketBase responses always include `totalPages`; default to a
+    // single page when it's absent (e.g. minimal test fakes).
+    #[serde(rename = "totalPages", default)]
+    total_pages: u32,
 }
 
 impl PocketBaseClient {
@@ -217,6 +222,9 @@ impl PocketBaseClient {
         Ok(response.json().await?)
     }
 
+    /// Fetch every record matching `filter`, following PocketBase list
+    /// pagination (default `perPage` is 30, so a single request silently
+    /// drops records beyond the first page).
     async fn list_records<T>(
         &self,
         token: &str,
@@ -226,13 +234,28 @@ impl PocketBaseClient {
     where
         T: DeserializeOwned,
     {
-        let mut url = url::Url::parse(&self.collection_records_url(collection))
+        let mut base_url = url::Url::parse(&self.collection_records_url(collection))
             .expect("PocketBase collection records URL should be valid");
-        url.query_pairs_mut().append_pair("filter", filter);
-        let response = self.http_client.get(url).bearer_auth(token).send().await?;
-        let response = self.ensure_success(response).await?;
-        let list = response.json::<PocketBaseList<T>>().await?;
-        Ok(list.items)
+        base_url
+            .query_pairs_mut()
+            .append_pair("filter", filter)
+            .append_pair("perPage", &LIST_PER_PAGE.to_string());
+
+        let mut items = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let mut url = base_url.clone();
+            url.query_pairs_mut().append_pair("page", &page.to_string());
+            let response = self.http_client.get(url).bearer_auth(token).send().await?;
+            let response = self.ensure_success(response).await?;
+            let list = response.json::<PocketBaseList<T>>().await?;
+            let last_page = list.total_pages.max(1);
+            items.extend(list.items);
+            if page >= last_page {
+                return Ok(items);
+            }
+            page += 1;
+        }
     }
 
     async fn ensure_success(
