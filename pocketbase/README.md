@@ -29,6 +29,7 @@ POCKETBASE_URL=http://127.0.0.1:8090
 
 PocketBase has no `--cert`/`--key` flags (its `--https` flag only obtains Let's Encrypt certificates for public domains), so the optional `-k3d` targets terminate HTTPS in front of it with an Istio ingress gateway on a local [k3d](https://k3d.io) cluster:
 
+
 ```text
 client --HTTPS (local CA)--> Istio ingress gateway --Istio mTLS (STRICT)--> PocketBase :8090
 ```
@@ -44,6 +45,14 @@ make pocketbase-delete-k3d  # deletes the cluster; data stays in pocketbase/pb_d
 `make pocketbase-run-k3d` first runs `make pocketbase-cert`, which creates a self-signed local CA (`pocketbase/ca.crt`) and a `localhost`/`127.0.0.1` server certificate issued by it (`pocketbase/localhost.crt`). PocketBase is then served at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run` (run only one at a time).
 
 Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`). The host port is fixed when the cluster is created, so to change `POCKETBASE_HTTPS_PORT` run `make pocketbase-delete-k3d` first.
+
+make pocketbase-run    # creates PocketBase process
+make pocketbase-stop   # stops the process; data stays in pocketbase/pb_data
+```
+
+`make pocketbase-run` serves PocketBase at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run-insecure` (run only one at a time).
+
+Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`).
 
 Create a superuser:
 
