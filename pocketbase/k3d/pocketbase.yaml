@@ -1,0 +1,158 @@
+# PocketBase behind an Istio ingress gateway on k3d.
+# Rendered by pocketbase-k3d.sh, which substitutes the ${...} placeholders.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pocketbase
+  labels:
+    istio-injection: enabled
+---
+# Gateway -> PocketBase traffic must use Istio mesh mTLS.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: pocketbase
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pocketbase
+  namespace: pocketbase
+spec:
+  replicas: 1
+  # PocketBase uses SQLite; never run two pods against the same pb_data.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pocketbase
+  template:
+    metadata:
+      labels:
+        app: pocketbase
+    spec:
+      initContainers:
+        - name: fetch-pocketbase
+          image: alpine:3.20
+          # UID 1337 is Istio's proxy UID, whose traffic bypasses the sidecar
+          # redirect, so the download works before the sidecar is running.
+          securityContext:
+            runAsUser: 1337
+            runAsGroup: 1337
+          env:
+            - name: POCKETBASE_VERSION
+              value: "${POCKETBASE_VERSION}"
+          command:
+            - sh
+            - -euc
+            - |
+              case "$(uname -m)" in
+                x86_64) arch=amd64 ;;
+                aarch64 | arm64) arch=arm64 ;;
+                *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+              esac
+              zip="pocketbase_${POCKETBASE_VERSION}_linux_${arch}.zip"
+              base="https://github.com/pocketbase/pocketbase/releases/download/v${POCKETBASE_VERSION}"
+              cd /tmp
+              wget -q "$base/$zip" "$base/checksums.txt"
+              grep " $zip\$" checksums.txt | sha256sum -c -
+              unzip -o -q "$zip" pocketbase -d /opt/pb
+          volumeMounts:
+            - name: pb-bin
+              mountPath: /opt/pb
+      containers:
+        - name: pocketbase
+          image: alpine:3.20
+          securityContext:
+            runAsUser: ${PB_UID}
+            runAsGroup: ${PB_GID}
+          command:
+            - /opt/pb/pocketbase
+            - serve
+            # Plain HTTP inside the pod only; TLS is terminated at the
+            # Istio gateway and the hop to this pod is Istio mTLS.
+            - --http=0.0.0.0:8090
+            - --dir=/pocketbase/pb_data
+            - --migrationsDir=/pocketbase/pb_migrations
+          ports:
+            - name: http
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+          volumeMounts:
+            - name: pb-bin
+              mountPath: /opt/pb
+            - name: pb-data
+              mountPath: /pocketbase/pb_data
+            - name: pb-migrations
+              mountPath: /pocketbase/pb_migrations
+              readOnly: true
+      volumes:
+        - name: pb-bin
+          emptyDir: {}
+        # Host paths are the repo's pocketbase/ dirs, mounted into the k3d node
+        # at cluster creation, so data is shared with `make pocketbase-run-insecure`.
+        - name: pb-data
+          hostPath:
+            path: /pocketbase/pb_data
+            type: Directory
+        - name: pb-migrations
+          hostPath:
+            path: /pocketbase/pb_migrations
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pocketbase
+  namespace: pocketbase
+spec:
+  selector:
+    app: pocketbase
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+---
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: pocketbase
+  namespace: pocketbase
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        # Secret in istio-system holding the self-signed-CA-issued cert.
+        credentialName: pocketbase-tls
+      hosts:
+        - "*"
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: pocketbase
+  namespace: pocketbase
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - pocketbase
+  http:
+    - route:
+        - destination:
+            host: pocketbase.pocketbase.svc.cluster.local
+            port:
+              number: 8090
