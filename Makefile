@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run pocketbase-run pocketbase-run-insecure
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-secure pocketbase-cert pocketbase-run pocketbase-stop pocketbase-run-insecure
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -32,18 +32,9 @@ rust-clean:
 rust-run:
 	@. ~/.cargo/env && cd music_browser && cargo run --bin music-browser
 
+# Self-signed local CA (pocketbase/ca.crt) + server cert (pocketbase/localhost.crt).
 pocketbase-cert:
-	@openssl req -x509 -newkey rsa:2048 -keyout pocketbase/localhost.key \
-		-out pocketbase/localhost.crt -days 365 -nodes \
-		-subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1"
-	@echo ""
-	@echo "Generated: pocketbase/localhost.crt and pocketbase/localhost.key"
-	@echo ""
-	@echo "Add these to your music_browser/.env file:"
-	@echo "  POCKETBASE_CA_CERT=pocketbase/localhost.crt"
-	@echo "  POCKETBASE_URL=https://127.0.0.1:8090"
-	@echo ""
-	@echo "Then run: make pocketbase-run"
+	@pocketbase/k3d/pocketbase-k3d.sh cert
 
 pocketbase-run-insecure:
 	@if [ -x pocketbase/pocketbase ]; then \
@@ -54,16 +45,24 @@ pocketbase-run-insecure:
 	echo "Starting PocketBase on HTTP (insecure, for local development only)."; \
 	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --http 127.0.0.1:8090
 
+# PocketBase has no --cert/--key flags, so HTTPS is provided by an Istio
+# ingress gateway on a local k3d cluster using the self-signed CA above.
+# Requires docker, k3d, kubectl and istioctl. Serves https://127.0.0.1:8090.
 pocketbase-run:
-	@if [ ! -f pocketbase/localhost.crt ] || [ ! -f pocketbase/localhost.key ]; then \
-		echo "Error: pocketbase/localhost.crt or pocketbase/localhost.key not found."; \
-		echo "Run: make pocketbase-cert"; \
-		exit 1; \
+	@pocketbase/k3d/pocketbase-k3d.sh up
+
+pocketbase-stop:
+	@pocketbase/k3d/pocketbase-k3d.sh down
+
+# Music browser over HTTPS, talking to `make pocketbase-run` over HTTPS.
+rust-run-secure:
+	@if [ ! -f music_browser/certs/server.crt ] || [ ! -f music_browser/certs/server.key ]; then \
+		cd music_browser && ./generate-cert.sh; \
 	fi
-	@if [ -x pocketbase/pocketbase ]; then \
-		POCKETBASE_BIN=pocketbase/pocketbase; \
-	else \
-		POCKETBASE_BIN=pocketbase; \
-	fi; \
-	echo "Starting PocketBase on HTTPS (beta, untested)."; \
-	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --cert pocketbase/localhost.crt --key pocketbase/localhost.key 127.0.0.1:8090
+	@. ~/.cargo/env && cd music_browser && \
+		HTTPS_ENABLED=true \
+		CSRF_COOKIE_SECURE=true \
+		AUTH_COOKIE_SECURE=true \
+		POCKETBASE_URL=https://127.0.0.1:8090 \
+		POCKETBASE_CA_CERT=../pocketbase/ca.crt \
+		cargo run --bin music-browser

@@ -25,25 +25,49 @@ Make sure your `.env` matches:
 POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
-## HTTPS (Beta/Untested)
+## HTTPS (self-signed CA, Istio on k3d)
 
-To run PocketBase with HTTPS locally, generate a self-signed certificate:
+PocketBase has no `--cert`/`--key` flags (its `--https` flag only obtains Let's Encrypt certificates for public domains), so HTTPS is terminated in front of it by an Istio ingress gateway on a local [k3d](https://k3d.io) cluster:
 
-```bash
-make pocketbase-cert
+```text
+client --HTTPS (local CA)--> Istio ingress gateway --Istio mTLS (STRICT)--> PocketBase :8090
 ```
 
-This creates `pocketbase/localhost.crt` and `pocketbase/localhost.key`.
-
-Then run:
+Requires `docker`, `k3d`, `kubectl`, and [`istioctl`](https://istio.io/latest/docs/setup/getting-started/#download).
 
 ```bash
-make pocketbase-run
+make pocketbase-run    # creates cluster, installs Istio, deploys PocketBase
+make pocketbase-stop   # stops the cluster; data stays in pocketbase/pb_data
 ```
 
-**Note:** This HTTPS mode is beta and untested. Your browser may require a local exception for self-signed certificates.
+`make pocketbase-run` first runs `make pocketbase-cert`, which creates a self-signed local CA (`pocketbase/ca.crt`) and a `localhost`/`127.0.0.1` server certificate issued by it (`pocketbase/localhost.crt`). PocketBase is then served at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run-insecure` (run only one at a time).
 
-For production deployment, refer to PocketBase documentation for recommended TLS setup.
+Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`).
+
+Create a superuser:
+
+```bash
+kubectl --context k3d-music-browser -n pocketbase exec deploy/pocketbase -c pocketbase -- \
+  /opt/pb/pocketbase superuser upsert --dir /pocketbase/pb_data <email> <password>
+```
+
+Run the music browser over HTTPS against it (also generates `music_browser/certs/` if missing):
+
+```bash
+make rust-run-secure
+```
+
+which is equivalent to setting:
+
+```env
+HTTPS_ENABLED=true
+CSRF_COOKIE_SECURE=true
+AUTH_COOKIE_SECURE=true
+POCKETBASE_URL=https://127.0.0.1:8090
+POCKETBASE_CA_CERT=../pocketbase/ca.crt
+```
+
+Import `pocketbase/ca.crt` into your browser/OS trust store to open the PocketBase admin UI without warnings.
 
 Create the first admin user in the PocketBase admin UI, then create/enable the `users` auth collection.
 
