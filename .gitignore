@@ -16,3 +16,6 @@ music_browser/certs/
 # music_ara_client (JUCE ARA plugin, Phase 4)
 music_ara_client/build/
 music_ara_client/build-*/
+
+# make qnap-preflight output (contains LAN details)
+qnap-preflight.txt
