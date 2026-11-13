@@ -9,7 +9,7 @@ KEY_FILE="$CERT_DIR/server.key"
 mkdir -p "$CERT_DIR"
 
 # Generate self-signed certificate valid for 365 days
-openssl req -x509 -newkey rsa:4096 -nodes -keyout "$KEY_FILE" -out "$CERT_FILE" -days 365 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1"
+openssl req -x509 -newkey rsa:4096 -nodes -keyout "$KEY_FILE" -out "$CERT_FILE" -days 365 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
 echo "Certificate generated successfully:"
 echo "  Certificate: $CERT_FILE"
