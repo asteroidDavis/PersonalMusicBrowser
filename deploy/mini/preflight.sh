@@ -1,16 +1,17 @@
 #!/bin/sh
-# Read-only preflight for running the music browser stack on a QNAP NAS.
+# Read-only preflight for running the music browser stack on a small
+# (`mini`) host such as a NAS or single-board computer.
 #
-# Run it on the NAS (QTS ships BusyBox sh, so this is POSIX sh):
-#   ssh admin@<nas> 'sh -s' < deploy/qnap/preflight.sh > preflight.txt
-#   make qnap-preflight NAS=admin@<nas>
+# Run it on the host (POSIX sh, so BusyBox-based firmware works too):
+#   ssh admin@<host> 'sh -s' < deploy/mini/preflight.sh > mini-preflight.txt
+#   make mini-preflight HOST=admin@<host>
 #
 # It only reads system state. With --container-tests it also starts two
 # short-lived throwaway containers (docker run --rm) to check privileged
 # mode and cgroups inside a container; nothing else is changed.
 #
 # The last block (between "BEGIN SUMMARY" and "END SUMMARY") is KEY=VALUE
-# lines meant to be pasted back for the qnap Helm values.
+# lines meant to be pasted back for the mini Helm values.
 
 CONTAINER_TESTS=0
 for arg in "$@"; do
@@ -27,10 +28,10 @@ for arg in "$@"; do
     esac
 done
 
-# Container Station and QPKG binaries are not always on a non-login PATH.
+# Vendor app-package binaries are not always on a non-login PATH.
 PATH="$PATH:/usr/local/bin:/usr/local/sbin:/sbin:/usr/sbin:/bin:/usr/bin"
 
-# Memory budget for the whole cluster (k3s + Istio + apps) plus QTS headroom.
+# Memory budget for the whole cluster (k3s + Istio + apps) plus host OS headroom.
 MIN_MEM_TOTAL_MB=3500
 MIN_MEM_AVAILABLE_MB=1500
 MIN_FREE_DISK_GB=20
@@ -54,7 +55,7 @@ fail() {
     FAILS=$((FAILS + 1))
 }
 
-# getcfg is QTS's INI reader; fall back to awk elsewhere.
+# Some NAS firmwares ship getcfg as their INI reader; fall back to awk.
 cfg() { # section key file
     if have getcfg; then
         getcfg "$1" "$2" -f "$3" 2>/dev/null
@@ -68,25 +69,30 @@ meminfo_mb() { awk -v k="$1:" '$1==k{printf "%d", $2/1024}' /proc/meminfo 2>/dev
 
 # --------------------------------------------------------------------------
 section "System"
-MODEL="$(cfg System Model /etc/config/uLinux.conf)"
-[ -n "$MODEL" ] || MODEL="$(getsysinfo model 2>/dev/null)"
-[ -n "$MODEL" ] || MODEL="$(cat /etc/model 2>/dev/null)"
-QTS_VERSION="$(cfg System Version /etc/config/uLinux.conf)"
-QTS_BUILD="$(cfg System 'Build Number' /etc/config/uLinux.conf)"
+VENDOR_CONF=/etc/config/uLinux.conf
+MODEL="$(cat /sys/firmware/devicetree/base/model 2>/dev/null | tr -d '\0')"
+[ -n "$MODEL" ] || MODEL="$(cat /sys/class/dmi/id/product_name 2>/dev/null)"
+[ -n "$MODEL" ] || MODEL="$(cfg System Model "$VENDOR_CONF")"
+OS_VERSION="$(awk -F= '$1=="PRETTY_NAME"{gsub(/"/, "", $2); print $2}' /etc/os-release 2>/dev/null)"
+if [ -z "$OS_VERSION" ] && [ -r "$VENDOR_CONF" ]; then
+    OS_VERSION="$(cfg System Version "$VENDOR_CONF") build $(cfg System 'Build Number' "$VENDOR_CONF")"
+fi
 ARCH="$(uname -m)"
 KERNEL="$(uname -r)"
 PAGESIZE="$(getconf PAGESIZE 2>/dev/null || getconf PAGE_SIZE 2>/dev/null)"
+# BusyBox often has no getconf; smaps reports the kernel page size in kB.
+[ -n "$PAGESIZE" ] || PAGESIZE="$(awk '/^KernelPageSize:/{print $2 * 1024; exit}' /proc/self/smaps 2>/dev/null)"
 NPROC="$(grep -c '^processor' /proc/cpuinfo 2>/dev/null)"
 CPU_PART="$(awk -F': *' '/^CPU part/{print $2;exit}' /proc/cpuinfo 2>/dev/null)"
-info "model:        ${MODEL:-unknown (not QTS?)}"
-info "qts:          ${QTS_VERSION:-unknown} ${QTS_BUILD}"
+info "model:        ${MODEL:-unknown}"
+info "os:           ${OS_VERSION:-unknown}"
 info "kernel:       $KERNEL"
 info "arch:         $ARCH"
 info "cpus:         ${NPROC:-?}${CPU_PART:+ (CPU part $CPU_PART; 0xd05 = Cortex-A55)}"
 info "page size:    ${PAGESIZE:-?}"
 info "date (UTC):   $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 summary MODEL "${MODEL:-unknown}"
-summary QTS_VERSION "${QTS_VERSION:-unknown}"
+summary OS_VERSION "${OS_VERSION:-unknown}"
 summary ARCH "$ARCH"
 summary KERNEL "$KERNEL"
 summary PAGESIZE "${PAGESIZE:-unknown}"
@@ -186,26 +192,25 @@ fi
 info "ip_forward:   $(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
 
 # --------------------------------------------------------------------------
-section "Container Station / Docker"
-CS_PATH="$(cfg container-station Install_Path /etc/config/qpkg.conf)"
-CS_VERSION="$(cfg container-station Version /etc/config/qpkg.conf)"
-CS_ENABLED="$(cfg container-station Enable /etc/config/qpkg.conf)"
-info "container-station: ${CS_VERSION:-not found} ${CS_PATH:+at $CS_PATH} ${CS_ENABLED:+(Enable=$CS_ENABLED)}"
-summary CONTAINER_STATION_VERSION "${CS_VERSION:-none}"
-summary CONTAINER_STATION_PATH "${CS_PATH:-none}"
-
+section "Docker"
 DOCKER=""
 if have docker; then
     DOCKER="$(command -v docker)"
-elif [ -n "$CS_PATH" ] && [ -x "$CS_PATH/bin/docker" ]; then
-    DOCKER="$CS_PATH/bin/docker"
+else
+    # NAS app packages install docker outside PATH.
+    for p in /share/*/.qpkg/*/bin/docker /var/packages/*/target/usr/bin/docker /opt/*/bin/docker; do
+        if [ -x "$p" ]; then
+            DOCKER="$p"
+            break
+        fi
+    done
 fi
 summary DOCKER_BIN "${DOCKER:-none}"
 DOCKER_OK=0
 if [ -z "$DOCKER" ]; then
-    fail "docker CLI not found (install/enable Container Station)"
+    fail "docker CLI not found (install or enable the container runtime)"
 elif ! "$DOCKER" info >/dev/null 2>&1; then
-    fail "docker at $DOCKER cannot reach the daemon (run as admin, or start Container Station)"
+    fail "docker at $DOCKER cannot reach the daemon (run as an admin user, or start the container runtime)"
 else
     DOCKER_OK=1
     DOCKER_VERSION="$("$DOCKER" version --format '{{.Server.Version}}' 2>/dev/null)"
@@ -228,8 +233,8 @@ fi
 # --------------------------------------------------------------------------
 section "Kubernetes tooling"
 K3S_BUILTIN=none
-for p in "$CS_PATH/bin/k3s" "$CS_PATH/k3s/k3s" /usr/local/bin/k3s; do
-    [ -n "${p%%/bin/k3s}" ] || continue
+DOCKER_DIR="$(dirname "${DOCKER:-/nonexistent/docker}")"
+for p in "$DOCKER_DIR/k3s" "$DOCKER_DIR/../k3s/k3s" /usr/local/bin/k3s; do
     if [ -x "$p" ]; then
         K3S_BUILTIN="$p"
         break
@@ -274,32 +279,33 @@ summary NAS_IPV4 "$NAS_IPS"
 summary DEFAULT_GATEWAY "${DEFAULT_GW:-unknown}"
 summary RESOLVERS "$RESOLVERS"
 
+# "proto local-address process" per listening socket.
 LISTEN=""
 if have ss; then
-    LISTEN="$(ss -Htuln 2>/dev/null | awk '{print $1" "$5}')"
+    LISTEN="$(ss -Htulnp 2>/dev/null | awk '{p=$7; sub(/^users:\(\("/, "", p); sub(/".*/, "", p); print $1" "$5" "(p == "" ? "?" : p)}')"
 elif have netstat; then
-    LISTEN="$(netstat -tuln 2>/dev/null | awk '/^(tcp|udp)/{print $1" "$4}')"
+    LISTEN="$(netstat -tulnp 2>/dev/null | awk '/^(tcp|udp)/{p=$NF; if (p !~ /\//) p="?/?"; sub(/^[0-9]+\//, "", p); print $1" "$4" "p}')"
 fi
-# port used_by_hint
+# port hint
 check_port() {
     if [ -z "$LISTEN" ]; then
         warn "port $1: cannot list listening sockets (no ss/netstat)"
         summary "PORT_$1" unknown
         return
     fi
-    owners="$(printf '%s\n' "$LISTEN" | awk -v p="$1" '{n=split($2,a,":"); if (a[n]==p) printf "%s ", $1}')"
-    if [ -n "$owners" ]; then
-        warn "port $1 in use ($owners) - $2"
+    holders="$(printf '%s\n' "$LISTEN" | awk -v p="$1" '{n=split($2,a,":"); if (a[n]==p) printf "%s:%s(%s) ", $1, $2, $3}')"
+    if [ -n "$holders" ]; then
+        warn "port $1 in use: $holders- $2"
         summary "PORT_$1" in-use
+        summary "PORT_$1_HOLDERS" "$holders"
     else
         pass "port $1 free"
         summary "PORT_$1" free
     fi
 }
-check_port 53 "LAN CoreDNS needs it; QTS DNS/dnsmasq or a DHCP server app may hold it"
-check_port 80 "used for the /trust CA download page; QTS web server may hold it"
-check_port 443 "Istio gateway HTTPS; QTS admin/web server may hold it (move QTS to another port or use a second IP)"
-info "QTS admin ports: http=$(cfg System 'Web Access Port' /etc/config/uLinux.conf) https=$(cfg Stunnel Port /etc/config/uLinux.conf)"
+check_port 53 "LAN CoreDNS needs it; if holders bind only loopback/bridge addresses, CoreDNS can bind the LAN IP alone"
+check_port 80 "used for the /trust CA download page; can move to another port"
+check_port 443 "gateway HTTPS; move the host web UI, bind the gateway to a second IP, or use another port"
 
 for url in https://ghcr.io/v2/ https://registry-1.docker.io/v2/ https://github.com/ https://pkgs.tailscale.com/; do
     code=""
@@ -316,22 +322,23 @@ done
 
 # --------------------------------------------------------------------------
 section "Storage"
-for d in /share/CACHEDEV*_DATA; do
-    [ -d "$d" ] || continue
-    df -k "$d" 2>/dev/null | awk -v d="$d" 'NR==2{printf "  %s: %d GB free of %d GB\n", d, $4/1048576, $2/1048576}'
-    free_gb="$(df -k "$d" 2>/dev/null | awk 'NR==2{printf "%d", $4/1048576}')"
-    fstype="$(awk -v d="$d" '$2==d{print $3; exit}' /proc/mounts 2>/dev/null)"
-    info "  filesystem: ${fstype:-?}"
-    vol="$(basename "$d")"
-    summary "VOLUME_${vol}_FREE_GB" "${free_gb:-unknown}"
-    summary "VOLUME_${vol}_FS" "${fstype:-unknown}"
+# One line per real filesystem; -P keeps df from wrapping long device names.
+MOUNTS="$(awk '$3 ~ /^(ext[234]|xfs|btrfs|zfs|f2fs)$/ {print $2" "$3}' /proc/mounts 2>/dev/null | sort -u -k1,1)"
+[ -n "$DOCKER_ROOT" ] && MOUNTS="$MOUNTS
+$DOCKER_ROOT docker-root"
+printf '%s\n' "$MOUNTS" | while read -r mnt fstype; do
+    [ -d "$mnt" ] || continue
+    free_gb="$(df -Pk "$mnt" 2>/dev/null | awk 'END{printf "%d", $(NF-2)/1048576}')"
+    size_gb="$(df -Pk "$mnt" 2>/dev/null | awk 'END{printf "%d", $(NF-4)/1048576}')"
+    info "$mnt ($fstype): ${free_gb:-?} GB free of ${size_gb:-?} GB"
     if [ -n "$free_gb" ] && [ "$free_gb" -lt "$MIN_FREE_DISK_GB" ]; then
-        warn "$d has less than ${MIN_FREE_DISK_GB} GB free"
+        printf '  [WARN] %s has less than %s GB free\n' "$mnt" "$MIN_FREE_DISK_GB"
     fi
 done
-SHARES="$(for s in /share/*; do [ -L "$s" ] && printf '%s ' "$(basename "$s")"; done)"
-info "shares:       $SHARES"
-summary SHARES "$SHARES"
+VOLUMES="$(printf '%s\n' "$MOUNTS" | while read -r mnt fstype; do
+    [ -d "$mnt" ] && printf '%s:%s:%sG ' "$mnt" "$fstype" "$(df -Pk "$mnt" 2>/dev/null | awk 'END{printf "%d", $(NF-2)/1048576}')"
+done)"
+summary VOLUMES "$VOLUMES"
 DISKS=""
 for b in /sys/block/sd* /sys/block/nvme*; do
     [ -e "$b/queue/rotational" ] || continue
@@ -380,12 +387,12 @@ else
 fi
 if [ "$K3S_BUILTIN" != none ]; then V_K3S=available; else V_K3S=not-found; fi
 if [ "$arch_ok" = 1 ] && [ "$DOCKER_OK" = 1 ]; then V_COMPOSE=go; else V_COMPOSE=no-go; fi
-info "k3d on Container Station docker: $V_K3D$([ "$V_K3D" = likely ] && echo ' (rerun with --container-tests to confirm privileged mode)')"
-info "Container Station built-in K3s:  $V_K3S"
-info "Docker Compose fallback:         $V_COMPOSE"
+info "k3d on docker:            $V_K3D$([ "$V_K3D" = likely ] && echo ' (rerun with --container-tests to confirm privileged mode)')"
+info "preinstalled k3s:         $V_K3S"
+info "Docker Compose fallback:  $V_COMPOSE"
 info "$FAILS fail, $WARNS warn"
 summary VERDICT_K3D "$V_K3D"
-summary VERDICT_BUILTIN_K3S "$V_K3S"
+summary VERDICT_PREINSTALLED_K3S "$V_K3S"
 summary VERDICT_COMPOSE "$V_COMPOSE"
 summary FAILS "$FAILS"
 summary WARNS "$WARNS"

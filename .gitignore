@@ -17,5 +17,5 @@ music_browser/certs/
 music_ara_client/build/
 music_ara_client/build-*/
 
-# make qnap-preflight output (contains LAN details)
-qnap-preflight.txt
+# make mini-preflight output (contains LAN details)
+mini-preflight.txt
