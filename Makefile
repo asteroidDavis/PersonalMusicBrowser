@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-secure pocketbase-cert pocketbase-run pocketbase-stop pocketbase-run-insecure mini-preflight
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-secure pocketbase-cert pocketbase-run pocketbase-stop pocketbase-run-insecure mini-preflight images release-binaries
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -73,3 +73,25 @@ mini-preflight:
 	@if [ -z "$(HOST)" ]; then echo "usage: make mini-preflight HOST=admin@<host-ip> [PREFLIGHT_ARGS=--container-tests]"; exit 2; fi
 	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh | tee mini-preflight.txt
 	@echo "Saved mini-preflight.txt"
+
+# Multi-arch images, e.g. make images PLATFORMS=linux/arm64 IMAGE_PREFIX=ghcr.io/asteroiddavis/ PUSH=1
+PLATFORMS ?= linux/amd64,linux/arm64
+IMAGE_PREFIX ?=
+IMAGE_TAG ?= dev
+MUSIC_OPERATIONS_REF ?= main
+images:
+	docker buildx build --platform $(PLATFORMS) -f deploy/images/music-browser.Dockerfile \
+		--build-arg MUSIC_OPERATIONS_REF=$(MUSIC_OPERATIONS_REF) \
+		-t $(IMAGE_PREFIX)music-browser:$(IMAGE_TAG) $(if $(PUSH),--push,--load) .
+	docker buildx build --platform $(PLATFORMS) -f deploy/images/pocketbase.Dockerfile \
+		-t $(IMAGE_PREFIX)music-browser-pocketbase:$(IMAGE_TAG) $(if $(PUSH),--push,--load) .
+
+# Linux release tarballs + SHA256SUMS in dist/ (cross-compiled, no QEMU).
+release-binaries:
+	@rm -rf dist && mkdir -p dist
+	@for arch in amd64 arm64; do \
+		docker buildx build --platform linux/$$arch -f deploy/images/music-browser.Dockerfile \
+			--target binaries --output type=local,dest=dist/linux-$$arch . && \
+		tar -C dist/linux-$$arch -czf dist/music-browser-$(IMAGE_TAG)-linux-$$arch.tar.gz music-browser bulk-import || exit 1; \
+	done
+	@cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
