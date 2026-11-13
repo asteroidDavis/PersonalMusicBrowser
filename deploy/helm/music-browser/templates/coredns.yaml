@@ -1,7 +1,7 @@
 {{- if .Values.lanDns.enabled }}
 {{- if not .Values.lanDns.records }}{{ fail "lanDns.records must map at least the hostname to the host's LAN IP" }}{{ end }}
 # LAN resolver, separate from the cluster's own CoreDNS. Listens on 5353
-# in the container (no NET_BIND_SERVICE); the Service exposes 53.
+# in the container; the Service exposes 53.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,7 +45,17 @@ spec:
         - name: coredns
           image: {{ .Values.lanDns.image }}
           args: ["-conf", "/etc/coredns/Corefile"]
-          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            # The image's user is the name "nonroot"; kubelet needs the uid.
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop: ["ALL"]
+              # /coredns carries this file capability; without it in the
+              # bounding set exec fails. It still listens on 5353.
+              add: ["NET_BIND_SERVICE"]
           ports:
             - {name: dns, containerPort: 5353, protocol: UDP}
             - {name: dns-tcp, containerPort: 5353, protocol: TCP}
