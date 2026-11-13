@@ -1,5 +1,14 @@
-
+# Read by `cargo audit` when run from the repo root (as CI does).
 [advisories]
-# EXPIRES: 2026-11-01
-# REASON: actix-test is bound to localhost; waiting for actix-web 4.x to bump h2.
-ignore = ["RUSTSEC-2026-0258"]
+ignore = [
+  # EXPIRES: 2027-02-01
+  # REASON: h2 0.3 comes from actix-http 3.x (HTTP/2 also forced on by awc/actix-test);
+  # no actix-http release uses h2 >=0.4.16 yet. Low-severity DoS on a LAN-only app.
+  "RUSTSEC-2026-0258",
+  # EXPIRES: 2027-02-01
+  # REASON: libsqlite3-sys (bundled SQLite < 3.54) via sqlx-sqlite, which caps it at
+  # <0.38 even in sqlx 0.9; no sqlx release allows the patched >=0.39. Exploiting it
+  # needs a local attacker to plant a crafted DB + -wal pair; the app only opens its
+  # own DATABASE_URL. Drop this once sqlx allows libsqlite3-sys >=0.39.
+  "RUSTSEC-2026-0459",
+]
