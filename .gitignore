@@ -19,3 +19,6 @@ music_ara_client/build-*/
 
 # make mini-preflight output (contains LAN details)
 mini-preflight.txt
+
+# make release-binaries output
+/dist/
