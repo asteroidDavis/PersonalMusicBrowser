@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-k3d pocketbase-cert pocketbase-run pocketbase-run-insecure pocketbase-run-k3d pocketbase-stop-k3d pocketbase-delete-k3d  qnap-preflight
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-k3d pocketbase-cert pocketbase-run pocketbase-run-insecure pocketbase-run-k3d pocketbase-stop-k3d pocketbase-delete-k3d  mini-preflight
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -77,9 +77,9 @@ rust-run-k3d:
 		POCKETBASE_CA_CERT=../pocketbase/ca.crt \
 		cargo run --bin music-browser
 
-# Read-only checks on a QNAP NAS over SSH, e.g. make qnap-preflight NAS=admin@192.168.1.50
+# Read-only checks on a small host over SSH, e.g. make mini-preflight HOST=admin@192.168.1.50
 # Add PREFLIGHT_ARGS=--container-tests to also check privileged containers.
-qnap-preflight:
-	@if [ -z "$(NAS)" ]; then echo "usage: make qnap-preflight NAS=admin@<nas-ip> [PREFLIGHT_ARGS=--container-tests]"; exit 2; fi
-	@ssh "$(NAS)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/qnap/preflight.sh | tee qnap-preflight.txt
-	@echo "Saved qnap-preflight.txt"
+mini-preflight:
+	@if [ -z "$(HOST)" ]; then echo "usage: make mini-preflight HOST=admin@<host-ip> [PREFLIGHT_ARGS=--container-tests]"; exit 2; fi
+	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh | tee mini-preflight.txt
+	@echo "Saved mini-preflight.txt"

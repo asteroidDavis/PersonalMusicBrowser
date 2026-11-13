@@ -37,7 +37,6 @@ client --HTTPS (local CA)--> Istio ingress gateway --Istio mTLS (STRICT)--> Pock
 Requires `docker`, `k3d`, `kubectl`, and [`istioctl`](https://istio.io/latest/docs/setup/getting-started/#download).
 
 ```bash
-<<<<<<< HEAD
 make pocketbase-run-k3d     # creates cluster, installs Istio, deploys PocketBase
 make pocketbase-stop-k3d    # stops the cluster; data stays in pocketbase/pb_data
 make pocketbase-delete-k3d  # deletes the cluster; data stays in pocketbase/pb_data
