@@ -1,0 +1,7 @@
+# istio/gateway on a ~4 GB host.
+autoscaling:
+  enabled: false
+replicaCount: 1
+resources:
+  requests: {cpu: 20m, memory: 48Mi}
+  limits: {memory: 192Mi}

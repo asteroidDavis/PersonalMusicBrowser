@@ -330,17 +330,96 @@ impl Default for JobStore {
 #[allow(dead_code)]
 pub const MUSIC_OPERATIONS_BIN_ENV: &str = "MUSIC_OPERATIONS_BIN";
 
-#[allow(dead_code)]
 fn music_operations_bin() -> String {
     std::env::var(MUSIC_OPERATIONS_BIN_ENV).unwrap_or_else(|_| "music-operations".to_string())
 }
 
-#[allow(dead_code)]
 fn operation_cli_name(op: &Operation) -> Option<&'static str> {
     match op {
         Operation::GenerateSheetMusic => Some("anthemscore"),
         Operation::Repomix => Some("repomix"),
         Operation::Hitpoints => None,
+    }
+}
+
+/// One entry of `music-operations --list-operations`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OperationStatus {
+    pub name: String,
+    pub available: bool,
+    #[serde(default)]
+    pub reason: String,
+}
+
+/// Which `music-operations` operations this host can run, probed once at
+/// startup. When the probe fails every operation is treated as available so
+/// jobs still run (and fail with the CLI's own error) as before.
+#[derive(Debug, Clone, Default)]
+pub struct OperationAvailability {
+    statuses: Vec<OperationStatus>,
+}
+
+impl OperationAvailability {
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            statuses: serde_json::from_str(json)?,
+        })
+    }
+
+    pub async fn probe() -> Self {
+        let bin = music_operations_bin();
+        let output = tokio::process::Command::new(&bin)
+            .arg("--list-operations")
+            .output()
+            .await;
+        let parsed = match output {
+            Ok(out) if out.status.success() => {
+                Self::from_json(String::from_utf8_lossy(&out.stdout).trim())
+                    .map_err(|e| e.to_string())
+            }
+            Ok(out) => Err(format!("exit status {}", out.status)),
+            Err(e) => Err(e.to_string()),
+        };
+        match parsed {
+            Ok(avail) => {
+                for s in avail.statuses.iter().filter(|s| !s.available) {
+                    log::info!("operation {} unavailable: {}", s.name, s.reason);
+                }
+                avail
+            }
+            Err(e) => {
+                log::warn!("{bin} --list-operations failed ({e}); not filtering operations");
+                Self::default()
+            }
+        }
+    }
+
+    pub fn statuses(&self) -> &[OperationStatus] {
+        &self.statuses
+    }
+
+    /// `Some(reason)` when the host reported `op` as unavailable.
+    pub fn unavailable_reason(&self, op: &Operation) -> Option<String> {
+        let cli = operation_cli_name(op)?;
+        self.statuses
+            .iter()
+            .find(|s| s.name == cli && !s.available)
+            .map(|s| s.reason.clone())
+    }
+
+    /// Workflow operation name -> reason, for the jobs UI.
+    pub fn unavailable_by_operation(&self) -> Vec<(String, String)> {
+        [
+            Operation::GenerateSheetMusic,
+            Operation::Repomix,
+            Operation::Hitpoints,
+        ]
+        .iter()
+        .filter_map(|op| {
+            self.unavailable_reason(op)
+                .map(|r| (op.as_str().to_string(), r))
+        })
+        .collect()
     }
 }
 
@@ -832,6 +911,39 @@ async fn copy_to_temp(
 
 #[cfg(test)]
 mod tests {
+    use super::{Operation, OperationAvailability};
+
+    #[test]
+    fn availability_reports_unavailable_operations() {
+        let avail = OperationAvailability::from_json(
+            r#"[{"name":"anthemscore","available":false,"reason":"AnthemScore has no build for Linux aarch64"},
+                {"name":"repomix","available":true,"reason":""}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            avail
+                .unavailable_reason(&Operation::GenerateSheetMusic)
+                .as_deref(),
+            Some("AnthemScore has no build for Linux aarch64")
+        );
+        assert_eq!(avail.unavailable_reason(&Operation::Repomix), None);
+        assert_eq!(avail.unavailable_reason(&Operation::Hitpoints), None);
+        assert_eq!(
+            avail.unavailable_by_operation(),
+            vec![(
+                "generate_sheet_music".to_string(),
+                "AnthemScore has no build for Linux aarch64".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn availability_default_allows_everything() {
+        let avail = OperationAvailability::default();
+        assert!(avail.unavailable_by_operation().is_empty());
+        assert!(OperationAvailability::from_json("not json").is_err());
+    }
+
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;

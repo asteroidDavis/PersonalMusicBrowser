@@ -1,0 +1,28 @@
+# Small LAN host: ~4 cores, ~4 GB RAM, ~1 GB free, HDDs. Fits next to the
+# host OS; swap absorbs spikes. Measure RSS after deploy and adjust.
+musicBrowser:
+  env:
+    RUST_LOG: warn
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 384Mi}
+  persistence:
+    size: 2Gi
+
+pocketbase:
+  resources:
+    requests: {cpu: 25m, memory: 48Mi}
+    limits: {memory: 256Mi}
+  persistence:
+    size: 2Gi
+
+mesh:
+  proxyResources:
+    requests: {cpu: 10m, memory: 40Mi}
+    limits: {memory: 128Mi}
+
+lanDns:
+  enabled: true
+  resources:
+    requests: {cpu: 10m, memory: 24Mi}
+    limits: {memory: 64Mi}
