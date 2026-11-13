@@ -51,6 +51,12 @@ csrfSecret:
   # Generated once and kept across upgrades when empty.
   value: ""
 
+trust:
+  # ConfigMap with the *public* LAN CA files (ca.crt, ca.cer,
+  # music-browser-ca.mobileconfig, fingerprint); served at /trust over plain
+  # HTTP. Created by `deploy/tls/lan-ca.sh publish`. Empty = /trust disabled.
+  configMap: ""
+
 mesh:
   # Sidecars give music-browser <-> PocketBase mTLS (PeerAuthentication STRICT).
   sidecars: true

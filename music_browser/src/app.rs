@@ -2643,6 +2643,78 @@ pub async fn healthz() -> HttpResponse {
     HttpResponse::Ok().content_type("text/plain").body("ok")
 }
 
+pub const TRUST_DIR_ENV: &str = "TRUST_DIR";
+
+/// Public LAN CA files served under `/trust/` from `$TRUST_DIR`.
+const TRUST_FILES: &[(&str, &str)] = &[
+    ("ca.crt", "application/x-pem-file"),
+    ("ca.cer", "application/pkix-cert"),
+    (
+        "music-browser-ca.mobileconfig",
+        "application/x-apple-aspen-config",
+    ),
+];
+
+fn trust_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os(TRUST_DIR_ENV).map(std::path::PathBuf::from)
+}
+
+/// How to trust the LAN CA. Reachable over plain HTTP so a device can fetch
+/// the CA before it trusts the HTTPS certificate.
+pub async fn trust_page(req: HttpRequest) -> HttpResponse {
+    let fingerprint = trust_dir()
+        .and_then(|d| std::fs::read_to_string(d.join("fingerprint")).ok())
+        .map(|f| f.trim().replace(['<', '>', '&', '"'], ""))
+        .unwrap_or_default();
+    let host: String = req
+        .connection_info()
+        .host()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
+        .collect();
+    if fingerprint.is_empty() {
+        return HttpResponse::NotFound()
+            .content_type("text/plain")
+            .body("no LAN CA configured");
+    }
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(format!(
+            r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trust the Music Browser LAN CA</title></head><body style="font-family:sans-serif;max-width:40em;margin:auto;padding:1em">
+<h1>Trust the Music Browser LAN CA</h1>
+<p>Before installing, check this fingerprint matches the one your admin gave you:</p>
+<pre style="white-space:pre-wrap;word-break:break-all">{fingerprint}</pre>
+<ul>
+<li><a href="/trust/music-browser-ca.mobileconfig">iPhone / iPad / macOS profile</a> &mdash; on iOS also enable it under Settings &rarr; General &rarr; About &rarr; Certificate Trust Settings.</li>
+<li><a href="/trust/ca.cer">Android / Windows (DER)</a></li>
+<li><a href="/trust/ca.crt">Linux / Firefox (PEM)</a></li>
+</ul>
+<p>Then open <a href="https://{host}/">https://{host}/</a>.</p>
+</body></html>"#
+        ))
+}
+
+pub async fn trust_file(path: web::Path<String>) -> HttpResponse {
+    let name = path.into_inner();
+    let Some((file, mime)) = TRUST_FILES.iter().find(|(f, _)| *f == name) else {
+        return HttpResponse::NotFound().finish();
+    };
+    match trust_dir().and_then(|d| std::fs::read(d.join(file)).ok()) {
+        Some(bytes) => HttpResponse::Ok()
+            .content_type(*mime)
+            .insert_header((
+                "Content-Disposition",
+                format!("attachment; filename=\"{file}\""),
+            ))
+            .body(bytes),
+        None => HttpResponse::NotFound().finish(),
+    }
+}
+
 /// `music-operations --list-operations` as probed at startup.
 pub async fn operations_list(
     availability: Option<web::Data<OperationAvailability>>,
@@ -3016,6 +3088,8 @@ pub fn configure_app(cfg: &mut web::ServiceConfig) {
     cfg
         // Auth
         .route("/healthz", web::get().to(healthz))
+        .route("/trust", web::get().to(trust_page))
+        .route("/trust/{file}", web::get().to(trust_file))
         .route("/api/operations", web::get().to(operations_list))
         .route("/login", web::get().to(auth::login_view))
         .route("/login", web::post().to(auth::login_submit))
