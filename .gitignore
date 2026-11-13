@@ -22,3 +22,4 @@ mini-preflight.txt
 
 # make release-binaries output
 /dist/
+mini-kubeconfig
