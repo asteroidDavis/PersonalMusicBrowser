@@ -237,8 +237,9 @@ impl AuthConfig {
         }
 
         // `/api/workflows` stays public: the ARA plugin posts without credentials.
+        // `/trust*` is public: devices fetch the LAN CA before they can log in.
         let public_paths = std::env::var("AUTH_PUBLIC_PATHS")
-            .unwrap_or_else(|_| "/login,/signup,/logout,/api/workflows,/healthz".into())
+            .unwrap_or_else(|_| "/login,/signup,/logout,/api/workflows,/healthz,/trust,/trust/ca.crt,/trust/ca.cer,/trust/music-browser-ca.mobileconfig".into())
             .split(',')
             .map(|s| s.trim().to_string())
             .collect();

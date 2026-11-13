@@ -50,6 +50,9 @@ spec:
             - {name: AUTH_COOKIE_SECURE, value: "true"}
             - {name: CSRF_COOKIE_SECURE, value: "true"}
             - {name: HOME, value: /data}
+            {{- if .Values.trust.configMap }}
+            - {name: TRUST_DIR, value: /etc/music-browser/trust}
+            {{- end }}
             {{- if .Values.musicBrowser.musicPaths }}
             {{- $roots := list "/data" }}
             {{- range .Values.musicBrowser.musicPaths }}{{ $roots = append $roots .mountPath }}{{ end }}
@@ -72,6 +75,9 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- if .Values.trust.configMap }}
+            - {name: trust, mountPath: /etc/music-browser/trust, readOnly: true}
+            {{- end }}
             {{- range .Values.musicBrowser.musicPaths }}
             - {name: {{ .name }}, mountPath: {{ .mountPath }}, readOnly: true}
             {{- end }}
@@ -79,6 +85,10 @@ spec:
         {{- include "mb.dataVolume" (dict "p" .Values.musicBrowser.persistence "name" "music-browser") | nindent 8 }}
         - name: tmp
           emptyDir: {}
+        {{- with .Values.trust.configMap }}
+        - name: trust
+          configMap: {name: {{ . }}}
+        {{- end }}
         {{- range .Values.musicBrowser.musicPaths }}
         - name: {{ .name }}
           hostPath: {path: {{ .hostPath }}, type: Directory}
