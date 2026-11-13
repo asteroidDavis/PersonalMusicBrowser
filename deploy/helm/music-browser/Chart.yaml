@@ -1,0 +1,6 @@
+apiVersion: v2
+name: music-browser
+description: PersonalMusicBrowser website (with music_operations), PocketBase, Istio gateway routes and an optional LAN CoreDNS.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -110,9 +110,22 @@ const OP_HINTS = {
     repomix: 'Packs the target directory with Repomix.',
     hitpoints: 'Not yet wired to an external CLI — jobs will be marked failed.',
 };
+const UNAVAILABLE_OPS = {{ unavailable_ops_json|safe }};
+for (const opt of document.querySelectorAll('#eq-operation option')) {
+    const reason = UNAVAILABLE_OPS[opt.value];
+    if (reason) {
+        opt.disabled = true;
+        opt.textContent = opt.value + ' (unavailable)';
+        opt.title = reason;
+    }
+}
+const firstEnabled = document.querySelector('#eq-operation option:not([disabled])');
+if (firstEnabled) firstEnabled.selected = true;
 function updateOpHint() {
     const op = document.getElementById('eq-operation').value;
-    document.getElementById('op-hint').innerHTML = OP_HINTS[op] || '';
+    const reason = UNAVAILABLE_OPS[op];
+    document.getElementById('op-hint').innerHTML = reason ? '' : (OP_HINTS[op] || '');
+    if (reason) document.getElementById('op-hint').textContent = 'Unavailable on this host: ' + reason;
 }
 updateOpHint();
 
