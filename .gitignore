@@ -19,6 +19,8 @@ music_ara_client/build-*/
 
 # make mini-preflight output (contains LAN details)
 mini-preflight.txt
+mini-preflight.txt.tmp
 
 # make release-binaries output
 /dist/
+mini-kubeconfig
