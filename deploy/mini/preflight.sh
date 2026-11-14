@@ -355,6 +355,9 @@ esac
 # --------------------------------------------------------------------------
 if [ "$CONTAINER_TESTS" = 1 ] && [ "$DOCKER_OK" = 1 ]; then
     section "Container tests (--container-tests)"
+    # Remove the test image afterwards unless it was already on the host.
+    had_alpine=0
+    "$DOCKER" image inspect alpine:3.20 >/dev/null 2>&1 && had_alpine=1
     "$DOCKER" pull -q alpine:3.20 >/dev/null 2>&1
     if out="$("$DOCKER" run --rm alpine:3.20 sh -c 'uname -m; cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null || echo v1' 2>&1)"; then
         pass "unprivileged container runs: $(echo "$out" | tr '\n' ' ')"
@@ -371,6 +374,7 @@ if [ "$CONTAINER_TESTS" = 1 ] && [ "$DOCKER_OK" = 1 ]; then
         fail "privileged container failed (k3d cannot run): $out"
         summary PRIVILEGED fail
     fi
+    [ "$had_alpine" = 1 ] || "$DOCKER" rmi alpine:3.20 >/dev/null 2>&1 || true
 fi
 
 # --------------------------------------------------------------------------
