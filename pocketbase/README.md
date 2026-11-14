@@ -15,7 +15,7 @@ Put the `pocketbase` binary in this directory or make it available on your `PATH
 For local development, PocketBase runs over HTTP. This is secure enough for localhost and avoids certificate issues.
 
 ```bash
-make pocketbase-run-insecure
+make pocketbase-run    # alias: make pocketbase-run-insecure
 ```
 
 Default URL: `http://127.0.0.1:8090`
@@ -25,9 +25,9 @@ Make sure your `.env` matches:
 POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
-## HTTPS (self-signed CA, Istio on k3d)
+## HTTPS (optional: self-signed CA, Istio on k3d)
 
-PocketBase has no `--cert`/`--key` flags (its `--https` flag only obtains Let's Encrypt certificates for public domains), so HTTPS is terminated in front of it by an Istio ingress gateway on a local [k3d](https://k3d.io) cluster:
+PocketBase has no `--cert`/`--key` flags (its `--https` flag only obtains Let's Encrypt certificates for public domains), so the optional `-k3d` targets terminate HTTPS in front of it with an Istio ingress gateway on a local [k3d](https://k3d.io) cluster:
 
 ```text
 client --HTTPS (local CA)--> Istio ingress gateway --Istio mTLS (STRICT)--> PocketBase :8090
@@ -36,13 +36,14 @@ client --HTTPS (local CA)--> Istio ingress gateway --Istio mTLS (STRICT)--> Pock
 Requires `docker`, `k3d`, `kubectl`, and [`istioctl`](https://istio.io/latest/docs/setup/getting-started/#download).
 
 ```bash
-make pocketbase-run    # creates cluster, installs Istio, deploys PocketBase
-make pocketbase-stop   # stops the cluster; data stays in pocketbase/pb_data
+make pocketbase-run-k3d     # creates cluster, installs Istio, deploys PocketBase
+make pocketbase-stop-k3d    # stops the cluster; data stays in pocketbase/pb_data
+make pocketbase-delete-k3d  # deletes the cluster; data stays in pocketbase/pb_data
 ```
 
-`make pocketbase-run` first runs `make pocketbase-cert`, which creates a self-signed local CA (`pocketbase/ca.crt`) and a `localhost`/`127.0.0.1` server certificate issued by it (`pocketbase/localhost.crt`). PocketBase is then served at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run-insecure` (run only one at a time).
+`make pocketbase-run-k3d` first runs `make pocketbase-cert`, which creates a self-signed local CA (`pocketbase/ca.crt`) and a `localhost`/`127.0.0.1` server certificate issued by it (`pocketbase/localhost.crt`). PocketBase is then served at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run` (run only one at a time).
 
-Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`).
+Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`). The host port is fixed when the cluster is created, so to change `POCKETBASE_HTTPS_PORT` run `make pocketbase-delete-k3d` first.
 
 Create a superuser:
 
@@ -54,7 +55,7 @@ kubectl --context k3d-music-browser -n pocketbase exec deploy/pocketbase -c pock
 Run the music browser over HTTPS against it (also generates `music_browser/certs/` if missing):
 
 ```bash
-make rust-run-secure
+make rust-run-k3d
 ```
 
 which is equivalent to setting:
