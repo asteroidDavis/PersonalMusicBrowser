@@ -15,7 +15,7 @@ use crate::db::models::*;
 use crate::db::queries;
 use crate::jobs::{
     check_hydration, HydrationStatus, JobQueue, JobRecord, JobStatus, JobStore, Operation,
-    TargetType, WorkflowJob,
+    OperationAvailability, TargetType, WorkflowJob,
 };
 use crate::permissions;
 use crate::pocketbase_client::PocketBaseClient;
@@ -203,6 +203,8 @@ struct BandFormTemplate {
 struct JobsTemplate {
     jobs: Vec<JobRowView>,
     csrf_token: String,
+    /// JSON object: operation -> reason it can't run on this host.
+    unavailable_ops_json: String,
 }
 
 struct JobRowView {
@@ -2567,13 +2569,24 @@ pub async fn practice_priority_update(
 
 pub async fn jobs_list(
     store: web::Data<JobStore>,
+    availability: Option<web::Data<OperationAvailability>>,
     _csrf: actix_csrf_middleware::CsrfToken,
 ) -> actix_web::Result<HttpResponse> {
     log::info!("jobs_list handler called - JobStore and CSRF extraction succeeded");
     let jobs: Vec<JobRowView> = store.list().iter().map(job_to_row).collect();
+    let unavailable: serde_json::Map<String, serde_json::Value> = availability
+        .map(|a| a.unavailable_by_operation())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(op, reason)| (op, serde_json::Value::String(reason)))
+        .collect();
     let tmpl = JobsTemplate {
         jobs,
         csrf_token: _csrf.0,
+        // Rendered inside <script>; keep "</script>" in a reason from closing it.
+        unavailable_ops_json: serde_json::Value::Object(unavailable)
+            .to_string()
+            .replace('<', "\\u003c"),
     };
     let body = tmpl
         .render()
@@ -2612,6 +2625,34 @@ pub async fn job_detail(
 // Handlers — Workflow jobs API
 // ---------------------------------------------------------------------------
 
+fn ensure_operation_available(
+    availability: Option<&OperationAvailability>,
+    operation: &Operation,
+) -> actix_web::Result<()> {
+    match availability.and_then(|a| a.unavailable_reason(operation)) {
+        Some(reason) => Err(actix_web::error::ErrorUnprocessableEntity(format!(
+            "operation {} is unavailable on this host: {reason}",
+            operation.as_str()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Liveness/readiness probe; public so the gateway and kubelet can reach it.
+pub async fn healthz() -> HttpResponse {
+    HttpResponse::Ok().content_type("text/plain").body("ok")
+}
+
+/// `music-operations --list-operations` as probed at startup.
+pub async fn operations_list(
+    availability: Option<web::Data<OperationAvailability>>,
+) -> HttpResponse {
+    let statuses = availability
+        .map(|a| a.statuses().to_vec())
+        .unwrap_or_default();
+    HttpResponse::Ok().json(statuses)
+}
+
 #[derive(Deserialize)]
 pub struct WorkflowRequest {
     target_type: String,
@@ -2624,6 +2665,7 @@ pub async fn workflows_enqueue(
     req: HttpRequest,
     pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
+    availability: Option<web::Data<OperationAvailability>>,
     body: web::Json<WorkflowRequest>,
 ) -> actix_web::Result<HttpResponse> {
     let target_type = match body.target_type.as_str() {
@@ -2641,6 +2683,7 @@ pub async fn workflows_enqueue(
     let operation = Operation::parse(&body.operation).ok_or_else(|| {
         actix_web::error::ErrorBadRequest(format!("unknown operation: {}", body.operation))
     })?;
+    ensure_operation_available(availability.as_ref().map(|a| a.get_ref()), &operation)?;
 
     permissions::authorize_workflow_target(
         &req,
@@ -2972,6 +3015,8 @@ pub async fn group_share_create(
 pub fn configure_app(cfg: &mut web::ServiceConfig) {
     cfg
         // Auth
+        .route("/healthz", web::get().to(healthz))
+        .route("/api/operations", web::get().to(operations_list))
         .route("/login", web::get().to(auth::login_view))
         .route("/login", web::post().to(auth::login_submit))
         .route("/signup", web::get().to(auth::signup_view))
@@ -3161,6 +3206,7 @@ pub async fn workflows_enqueue_upload(
     req: HttpRequest,
     pocketbase: Option<web::Data<PocketBaseClient>>,
     queue: web::Data<JobQueue>,
+    availability: Option<web::Data<OperationAvailability>>,
     MultipartForm(form): MultipartForm<WorkflowUploadForm>,
 ) -> actix_web::Result<HttpResponse> {
     let target_type_str = form.target_type.into_inner();
@@ -3180,6 +3226,7 @@ pub async fn workflows_enqueue_upload(
     let operation = Operation::parse(&op_str).ok_or_else(|| {
         actix_web::error::ErrorBadRequest(format!("unknown operation: {}", op_str))
     })?;
+    ensure_operation_available(availability.as_ref().map(|a| a.get_ref()), &operation)?;
 
     let mut target_id_or_path = form.target_id_or_path.into_inner();
     let caller_supplied = form.audio_file.is_some();

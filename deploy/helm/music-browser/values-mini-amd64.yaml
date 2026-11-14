@@ -1,0 +1,3 @@
+# amd64 mini hosts. generate_sheet_music works once AnthemScore is mounted
+# into the image and AnthemScore's path is set in music_operations' config.
+arch: amd64

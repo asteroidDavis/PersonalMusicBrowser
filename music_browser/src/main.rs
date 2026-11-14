@@ -8,7 +8,7 @@ use actix_csrf_middleware::{CsrfMiddleware, CsrfMiddlewareConfig};
 use music_browser::{app, auth};
 
 use music_browser::db::pool;
-use music_browser::jobs::{run_worker, JobQueue};
+use music_browser::jobs::{run_worker, JobQueue, OperationAvailability};
 use music_browser::pocketbase_client::PocketBaseClient;
 
 #[actix_web::main]
@@ -75,6 +75,7 @@ async fn main() -> std::io::Result<()> {
     let job_store = job_queue.store.clone();
     tokio::spawn(run_worker(job_receiver, job_store.clone()));
     let queue_data = web::Data::new(job_queue);
+    let availability_data = web::Data::new(OperationAvailability::probe().await);
     let store_data = web::Data::new(job_store);
 
     log::info!("JobStore registered as app_data");
@@ -91,6 +92,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(pocketbase_data.clone())
             .app_data(queue_data.clone())
             .app_data(store_data.clone())
+            .app_data(availability_data.clone())
             .app_data(csrf_config.clone())
             .app_data(token_cache_data.clone())
             .wrap(middleware::Condition::new(

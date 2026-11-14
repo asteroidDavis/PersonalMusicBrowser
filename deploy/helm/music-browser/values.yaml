@@ -1,0 +1,83 @@
+# Defaults assume a cluster with spare resources. Small hosts layer
+# values-mini.yaml (+ values-mini-<arch>.yaml) on top.
+
+hostname: music.home.arpa
+
+image:
+  registry: ghcr.io/asteroiddavis
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# kubernetes.io/arch node selector; empty = any.
+arch: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+musicBrowser:
+  replicas: 1        # SQLite + in-memory job queue: keep at 1
+  port: 3000
+  env:
+    RUST_LOG: info
+    AUTH_REQUIRE_LOGIN: "true"
+  # Read-only library mounts, e.g. {name: music, hostPath: /share/Music, mountPath: /music}
+  musicPaths: []
+  persistence:
+    size: 5Gi
+    storageClass: ""
+    hostPath: ""     # use a fixed host dir instead of a PVC
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+pocketbase:
+  port: 8090
+  persistence:
+    size: 5Gi
+    storageClass: ""
+    hostPath: ""
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+csrfSecret:
+  # Generated once and kept across upgrades when empty.
+  value: ""
+
+mesh:
+  # Sidecars give music-browser <-> PocketBase mTLS (PeerAuthentication STRICT).
+  sidecars: true
+  proxyResources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 256Mi}
+
+gateway:
+  enabled: true
+  namespace: istio-ingress
+  selector:
+    istio: ingress
+  tlsSecretName: music-browser-tls
+  httpsPort: 443
+  httpPort: 80
+  # Also route pb.<hostname> to the PocketBase admin UI.
+  exposePocketbase: false
+
+lanDns:
+  enabled: false
+  image: coredns/coredns:1.12.1
+  # Answers for these names; everything else is forwarded.
+  records: {}        # {music.home.arpa: 10.0.0.124}
+  upstreams: [1.1.1.1, 9.9.9.9]
+  service:
+    type: LoadBalancer
+    loadBalancerIP: ""
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 128Mi}

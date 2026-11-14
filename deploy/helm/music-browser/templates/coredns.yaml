@@ -1,0 +1,78 @@
+{{- if .Values.lanDns.enabled }}
+{{- if not .Values.lanDns.records }}{{ fail "lanDns.records must map at least the hostname to the host's LAN IP" }}{{ end }}
+# LAN resolver, separate from the cluster's own CoreDNS. Listens on 5353
+# in the container (no NET_BIND_SERVICE); the Service exposes 53.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lan-coredns
+  labels: {{- include "mb.labels" . | nindent 4 }}
+data:
+  Corefile: |
+    .:5353 {
+        hosts {
+    {{- range $name, $ip := .Values.lanDns.records }}
+            {{ $ip }} {{ $name }}
+    {{- end }}
+            fallthrough
+        }
+        forward . {{ join " " .Values.lanDns.upstreams }}
+        cache 300
+        errors
+        health :8080
+        ready :8181
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lan-coredns
+  labels: {{- include "mb.labels" . | nindent 4 }}
+    app: lan-coredns
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: lan-coredns}
+  template:
+    metadata:
+      labels: {app: lan-coredns}
+      annotations:
+        checksum/corefile: {{ toJson .Values.lanDns | sha256sum }}
+        sidecar.istio.io/inject: "false"
+    spec:
+      {{- include "mb.podCommon" . | nindent 6 }}
+      containers:
+        - name: coredns
+          image: {{ .Values.lanDns.image }}
+          args: ["-conf", "/etc/coredns/Corefile"]
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - {name: dns, containerPort: 5353, protocol: UDP}
+            - {name: dns-tcp, containerPort: 5353, protocol: TCP}
+          readinessProbe:
+            httpGet: {path: /ready, port: 8181}
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 30
+          resources: {{- toYaml .Values.lanDns.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/coredns, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: lan-coredns}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lan-coredns
+  labels: {{- include "mb.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.lanDns.service.type }}
+  {{- with .Values.lanDns.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  selector: {app: lan-coredns}
+  ports:
+    - {name: dns, port: 53, targetPort: dns, protocol: UDP}
+    - {name: dns-tcp, port: 53, targetPort: dns-tcp, protocol: TCP}
+{{- end }}

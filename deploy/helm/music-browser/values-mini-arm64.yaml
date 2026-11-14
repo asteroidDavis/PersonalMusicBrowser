@@ -1,0 +1,3 @@
+# arm64 mini hosts. AnthemScore has no Linux arm64 build, so
+# generate_sheet_music is reported unavailable and rejected at enqueue.
+arch: arm64
