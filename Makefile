@@ -81,5 +81,7 @@ rust-run-k3d:
 # Add PREFLIGHT_ARGS=--container-tests to also check privileged containers.
 mini-preflight:
 	@if [ -z "$(HOST)" ]; then echo "usage: make mini-preflight HOST=admin@<host-ip> [PREFLIGHT_ARGS=--container-tests]"; exit 2; fi
-	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh | tee mini-preflight.txt
-	@echo "Saved mini-preflight.txt"
+	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh > mini-preflight.txt.tmp; \
+		rc=$$?; cat mini-preflight.txt.tmp; \
+		if [ $$rc -ne 0 ]; then echo "preflight over ssh failed (exit $$rc); kept the previous mini-preflight.txt"; rm -f mini-preflight.txt.tmp; exit $$rc; fi; \
+		mv mini-preflight.txt.tmp mini-preflight.txt; echo "Saved mini-preflight.txt"

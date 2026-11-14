@@ -19,3 +19,4 @@ music_ara_client/build-*/
 
 # make mini-preflight output (contains LAN details)
 mini-preflight.txt
+mini-preflight.txt.tmp
