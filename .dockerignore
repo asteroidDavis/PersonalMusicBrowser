@@ -1,0 +1,10 @@
+**/target
+**/.git
+music_ara_client
+pocketbase/pocketbase
+pocketbase/pb_data
+**/*.db
+**/*.db-*
+**/certs
+**/*.key
+mini-preflight.txt
