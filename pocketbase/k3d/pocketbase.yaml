@@ -90,14 +90,15 @@ spec:
               mountPath: /opt/pb
             - name: pb-data
               mountPath: /pocketbase/pb_data
+            # Writable: automigrate writes a migration here for each admin
+            # collection change, as with a local `make pocketbase-run`.
             - name: pb-migrations
               mountPath: /pocketbase/pb_migrations
-              readOnly: true
       volumes:
         - name: pb-bin
           emptyDir: {}
         # Host paths are the repo's pocketbase/ dirs, mounted into the k3d node
-        # at cluster creation, so data is shared with `make pocketbase-run-insecure`.
+        # at cluster creation, so data is shared with `make pocketbase-run`.
         - name: pb-data
           hostPath:
             path: /pocketbase/pb_data
