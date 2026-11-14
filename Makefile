@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run pocketbase-run pocketbase-run-insecure
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-k3d pocketbase-cert pocketbase-run pocketbase-run-insecure pocketbase-run-k3d pocketbase-stop-k3d pocketbase-delete-k3d
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -32,20 +32,15 @@ rust-clean:
 rust-run:
 	@. ~/.cargo/env && cd music_browser && cargo run --bin music-browser
 
-pocketbase-cert:
-	@openssl req -x509 -newkey rsa:2048 -keyout pocketbase/localhost.key \
-		-out pocketbase/localhost.crt -days 365 -nodes \
-		-subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1"
-	@echo ""
-	@echo "Generated: pocketbase/localhost.crt and pocketbase/localhost.key"
-	@echo ""
-	@echo "Add these to your music_browser/.env file:"
-	@echo "  POCKETBASE_CA_CERT=pocketbase/localhost.crt"
-	@echo "  POCKETBASE_URL=https://127.0.0.1:8090"
-	@echo ""
-	@echo "Then run: make pocketbase-run"
+# Default targets launch plain local processes. `<command>-k3d` variants are
+# optional and run PocketBase over HTTPS behind an Istio gateway on k3d.
 
-pocketbase-run-insecure:
+# Self-signed local CA (pocketbase/ca.crt) + server cert (pocketbase/localhost.crt).
+pocketbase-cert:
+	@pocketbase/k3d/pocketbase-k3d.sh cert
+
+# Local PocketBase process over HTTP on 127.0.0.1:8090.
+pocketbase-run:
 	@if [ -x pocketbase/pocketbase ]; then \
 		POCKETBASE_BIN=pocketbase/pocketbase; \
 	else \
@@ -54,16 +49,30 @@ pocketbase-run-insecure:
 	echo "Starting PocketBase on HTTP (insecure, for local development only)."; \
 	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --http 127.0.0.1:8090
 
-pocketbase-run:
-	@if [ ! -f pocketbase/localhost.crt ] || [ ! -f pocketbase/localhost.key ]; then \
-		echo "Error: pocketbase/localhost.crt or pocketbase/localhost.key not found."; \
-		echo "Run: make pocketbase-cert"; \
-		exit 1; \
+pocketbase-run-insecure: pocketbase-run
+
+# PocketBase has no --cert/--key flags, so HTTPS is provided by an Istio
+# ingress gateway on a local k3d cluster using the self-signed CA above.
+# Requires docker, k3d, kubectl and istioctl. Serves https://127.0.0.1:8090.
+pocketbase-run-k3d:
+	@pocketbase/k3d/pocketbase-k3d.sh up
+
+pocketbase-stop-k3d:
+	@pocketbase/k3d/pocketbase-k3d.sh down
+
+# Deletes the k3d cluster (e.g. to change POCKETBASE_HTTPS_PORT); data stays in pocketbase/pb_data.
+pocketbase-delete-k3d:
+	@pocketbase/k3d/pocketbase-k3d.sh delete
+
+# Music browser over HTTPS, talking to `make pocketbase-run-k3d` over HTTPS.
+rust-run-k3d:
+	@if [ ! -f music_browser/certs/server.crt ] || [ ! -f music_browser/certs/server.key ]; then \
+		cd music_browser && ./generate-cert.sh; \
 	fi
-	@if [ -x pocketbase/pocketbase ]; then \
-		POCKETBASE_BIN=pocketbase/pocketbase; \
-	else \
-		POCKETBASE_BIN=pocketbase; \
-	fi; \
-	echo "Starting PocketBase on HTTPS (beta, untested)."; \
-	$$POCKETBASE_BIN serve --dir pocketbase/pb_data --cert pocketbase/localhost.crt --key pocketbase/localhost.key 127.0.0.1:8090
+	@. ~/.cargo/env && cd music_browser && \
+		HTTPS_ENABLED=true \
+		CSRF_COOKIE_SECURE=true \
+		AUTH_COOKIE_SECURE=true \
+		POCKETBASE_URL=https://127.0.0.1:$${POCKETBASE_HTTPS_PORT:-8090} \
+		POCKETBASE_CA_CERT=../pocketbase/ca.crt \
+		cargo run --bin music-browser
