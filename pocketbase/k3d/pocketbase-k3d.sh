@@ -8,7 +8,7 @@
 #
 #   client --HTTPS (local CA)--> Istio gateway --Istio mTLS--> PocketBase :8090
 #
-# Usage: pocketbase-k3d.sh cert|up|down
+# Usage: pocketbase-k3d.sh cert|up|down|delete
 #
 # Requires: docker, k3d, kubectl, istioctl, openssl, curl.
 #
@@ -84,6 +84,12 @@ EXT
     chmod 600 "$CA_KEY" "$TLS_KEY"
 }
 
+# Host port bound to the gateway's :443 on the cluster's load balancer.
+cluster_https_port() {
+    docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{if eq $p "443/tcp"}}{{range $b}}{{.HostPort}}{{end}}{{end}}{{end}}' \
+        "k3d-$K3D_CLUSTER-serverlb" 2>/dev/null || true
+}
+
 cmd_up() {
     require docker k3d kubectl istioctl openssl curl
     cmd_cert
@@ -91,6 +97,15 @@ cmd_up() {
     mkdir -p "$PB_DIR/pb_data" "$PB_DIR/pb_migrations"
 
     if k3d cluster get "$K3D_CLUSTER" >/dev/null 2>&1; then
+        # The load balancer's host port is fixed when the cluster is created.
+        local mapped_port
+        mapped_port="$(cluster_https_port)"
+        if [ "$mapped_port" != "$POCKETBASE_HTTPS_PORT" ]; then
+            echo "error: k3d cluster '$K3D_CLUSTER' maps https://127.0.0.1:${mapped_port:-?}, not port $POCKETBASE_HTTPS_PORT." >&2
+            echo "Either set POCKETBASE_HTTPS_PORT=${mapped_port:-<port>}, or recreate the cluster with" >&2
+            echo "'make pocketbase-delete-k3d' (data stays in $PB_DIR/pb_data) and run again." >&2
+            exit 1
+        fi
         log "Using existing k3d cluster '$K3D_CLUSTER'"
         k3d cluster start "$K3D_CLUSTER" >/dev/null
     else
@@ -137,7 +152,7 @@ Create a superuser with:
   kubectl --context $ctx -n pocketbase exec deploy/pocketbase -c pocketbase -- \\
     /opt/pb/pocketbase superuser upsert --dir /pocketbase/pb_data <email> <password>
 
-Set in music_browser/.env (or run \`make rust-run-secure\`):
+Set in music_browser/.env (or run \`make rust-run-k3d\`):
   POCKETBASE_URL=$url
   POCKETBASE_CA_CERT=../pocketbase/ca.crt
   AUTH_COOKIE_SECURE=true
@@ -160,12 +175,23 @@ cmd_down() {
     fi
 }
 
+cmd_delete() {
+    require k3d
+    if k3d cluster get "$K3D_CLUSTER" >/dev/null 2>&1; then
+        log "Deleting k3d cluster '$K3D_CLUSTER' (data stays in $PB_DIR/pb_data)"
+        k3d cluster delete "$K3D_CLUSTER"
+    else
+        log "No k3d cluster '$K3D_CLUSTER'"
+    fi
+}
+
 case "${1:-}" in
     cert) cmd_cert ;;
     up) cmd_up ;;
     down) cmd_down ;;
+    delete) cmd_delete ;;
     *)
-        echo "usage: $0 cert|up|down" >&2
+        echo "usage: $0 cert|up|down|delete" >&2
         exit 2
         ;;
 esac
