@@ -365,6 +365,7 @@ if [ "$CONTAINER_TESTS" = 1 ] && [ "$DOCKER_OK" = 1 ]; then
     else
         fail "cannot run a container: $out"
         summary CONTAINER_RUN fail
+        CONTAINER_RUN_FAILED=1
     fi
     if out="$("$DOCKER" run --rm --privileged alpine:3.20 sh -c 'mount -t tmpfs t /mnt && echo mounted' 2>&1)" \
         && echo "$out" | grep -q mounted; then
@@ -390,7 +391,11 @@ else
     V_K3D=no-go
 fi
 if [ "$K3S_BUILTIN" != none ]; then V_K3S=available; else V_K3S=not-found; fi
-if [ "$arch_ok" = 1 ] && [ "$DOCKER_OK" = 1 ]; then V_COMPOSE=go; else V_COMPOSE=no-go; fi
+if [ "$arch_ok" = 1 ] && [ "$DOCKER_OK" = 1 ] && [ "${CONTAINER_RUN_FAILED:-0}" = 0 ]; then
+    V_COMPOSE=go
+else
+    V_COMPOSE=no-go
+fi
 info "k3d on docker:            $V_K3D$([ "$V_K3D" = likely ] && echo ' (rerun with --container-tests to confirm privileged mode)')"
 info "preinstalled k3s:         $V_K3S"
 info "Docker Compose fallback:  $V_COMPOSE"
