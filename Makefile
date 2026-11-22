@@ -1,4 +1,4 @@
-.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-k3d pocketbase-cert pocketbase-run pocketbase-run-insecure pocketbase-run-k3d pocketbase-stop-k3d pocketbase-delete-k3d
+.PHONY: backup ara-test ara-plugin ara-clean rust-clean rust-run rust-run-k3d pocketbase-cert pocketbase-run pocketbase-run-insecure pocketbase-run-k3d pocketbase-stop-k3d pocketbase-delete-k3d  mini-preflight
 
 backup:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD | sed 's/\//-/g') && \
@@ -76,3 +76,12 @@ rust-run-k3d:
 		POCKETBASE_URL=https://127.0.0.1:$${POCKETBASE_HTTPS_PORT:-8090} \
 		POCKETBASE_CA_CERT=../pocketbase/ca.crt \
 		cargo run --bin music-browser
+
+# Read-only checks on a small host over SSH, e.g. make mini-preflight HOST=admin@192.168.1.50
+# Add PREFLIGHT_ARGS=--container-tests to also check privileged containers.
+mini-preflight:
+	@if [ -z "$(HOST)" ]; then echo "usage: make mini-preflight HOST=admin@<host-ip> [PREFLIGHT_ARGS=--container-tests]"; exit 2; fi
+	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh > mini-preflight.txt.tmp; \
+		rc=$$?; cat mini-preflight.txt.tmp; \
+		if [ $$rc -ne 0 ]; then echo "preflight over ssh failed (exit $$rc); kept the previous mini-preflight.txt"; rm -f mini-preflight.txt.tmp; exit $$rc; fi; \
+		mv mini-preflight.txt.tmp mini-preflight.txt && echo "Saved mini-preflight.txt"
