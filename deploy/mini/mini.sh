@@ -190,12 +190,20 @@ cmd_backup() {
 
 cmd_restore() {
     local file="${1:?usage: restore <backup.tgz on the host>}"
+    file="$(remote "readlink -f $file")"
     remote "tar tzf $file >/dev/null" || die "$file is not a readable backup on the host"
     scale 0
     trap 'scale 1' EXIT
+    busybox "rm -rf /d/restore.new"
+    # Unpack beside the live data first so a failed or partial restore leaves it untouched.
+    remote "mkdir $MINI_ROOT/data/restore.new && tar xzf $file -C $MINI_ROOT/data/restore.new &&
+        [ -d $MINI_ROOT/data/restore.new/app ] && [ -d $MINI_ROOT/data/restore.new/pb ]" || {
+        busybox "rm -rf /d/restore.new"
+        die "could not unpack app/ and pb/ from $file; current data left in place"
+    }
     busybox "rm -rf /d/app.old /d/pb.old"
     remote "cd $MINI_ROOT/data && mv app app.old && mv pb pb.old &&
-        tar xzf $file"
+        mv restore.new/app app && mv restore.new/pb pb && rmdir restore.new"
     busybox "sh -c 'chown -R 10001:10001 /d/app && chown -R 10002:10002 /d/pb'"
     trap - EXIT
     scale 1

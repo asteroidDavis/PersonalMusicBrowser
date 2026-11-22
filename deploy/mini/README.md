@@ -120,7 +120,7 @@ keeps it. App and PocketBase migrations run on startup.
 | --- | --- |
 | `status` | pods, host `free -m`, node container memory |
 | `backup` | scale app + PocketBase to 0, tar both data dirs to `MINI_ROOT/backups/backup-<time>.tgz`, scale back up (about 30 s downtime) |
-| `restore <file>` | scale to 0, keep the current data as `app.old`/`pb.old`, unpack the backup, fix ownership, scale up |
+| `restore <file>` | scale to 0, unpack the backup beside the current data, then swap it in (keeping the current data as `app.old`/`pb.old`), fix ownership, scale up; if unpacking fails the current data is left in place |
 | `upgrade <tag>` | `backup`, then `deploy` with `IMAGE_TAG=<tag>` |
 | `rollback` | `helm rollback` to the previous release; if the new version migrated the database, also `restore` the backup `upgrade` took |
 | `disk-bench` | 200 x 4 KiB write+fsync in the data dir |
