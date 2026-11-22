@@ -23,3 +23,4 @@ mini-preflight.txt.tmp
 
 # make release-binaries output
 /dist/
+mini-kubeconfig
