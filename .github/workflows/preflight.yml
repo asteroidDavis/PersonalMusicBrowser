@@ -1,0 +1,41 @@
+name: Mini Preflight
+
+on:
+  push:
+    branches: [main, "feature/*"]
+    paths:
+      - "deploy/**/*.sh"
+      - ".github/workflows/preflight.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/**/*.sh"
+      - ".github/workflows/preflight.yml"
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck (deploy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ensure shellcheck
+        run: command -v shellcheck || (sudo apt-get update && sudo apt-get install -y shellcheck)
+      - name: shellcheck
+        run: |
+          shopt -s globstar nullglob
+          files=(deploy/**/*.sh)
+          shellcheck "${files[@]}"
+
+  preflight-containers:
+    name: Preflight checks across container setups
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unready container (alpine:3.20, no Docker)
+        run: bash deploy/mini/test-preflight.sh unready
+      - name: Preinstalled k3s container (rancher/k3s, no Docker)
+        run: bash deploy/mini/test-preflight.sh preinstalled-k3s
+      - name: Ready Docker host container (docker:27-cli + --container-tests)
+        run: bash deploy/mini/test-preflight.sh ready
