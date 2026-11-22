@@ -28,6 +28,18 @@ spec:
   hosts: [{{ .Values.hostname | quote }}]
   gateways: ["{{ .Values.gateway.namespace }}/music-browser"]
   http:
+    {{- if .Values.trust.configMap }}
+    # Devices fetch the CA here before they trust the HTTPS certificate.
+    - match:
+        - port: {{ .Values.gateway.httpPort }}
+          uri: {exact: /trust}
+        - port: {{ .Values.gateway.httpPort }}
+          uri: {prefix: /trust/}
+      route:
+        - destination:
+            host: music-browser.{{ .Release.Namespace }}.svc.cluster.local
+            port: {number: {{ .Values.musicBrowser.port }}}
+    {{- end }}
     - match:
         - port: {{ .Values.gateway.httpPort }}
       redirect:
