@@ -70,7 +70,7 @@ meminfo_mb() { awk -v k="$1:" '$1==k{printf "%d", $2/1024}' /proc/meminfo 2>/dev
 # --------------------------------------------------------------------------
 section "System"
 VENDOR_CONF=/etc/config/uLinux.conf
-MODEL="$(cat /sys/firmware/devicetree/base/model 2>/dev/null | tr -d '\0')"
+MODEL="$(tr -d '\0' 2>/dev/null </sys/firmware/devicetree/base/model)"
 [ -n "$MODEL" ] || MODEL="$(cat /sys/class/dmi/id/product_name 2>/dev/null)"
 [ -n "$MODEL" ] || MODEL="$(cfg System Model "$VENDOR_CONF")"
 OS_VERSION="$(awk -F= '$1=="PRETTY_NAME"{gsub(/"/, "", $2); print $2}' /etc/os-release 2>/dev/null)"

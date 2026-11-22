@@ -52,8 +52,6 @@ make pocketbase-stop   # stops the process; data stays in pocketbase/pb_data
 
 `make pocketbase-run` serves PocketBase at `https://127.0.0.1:8090` (admin UI: `https://127.0.0.1:8090/_/`). The pod runs the official PocketBase release (checksum verified) against this directory's `pb_data` and `pb_migrations`, so data is shared with `make pocketbase-run-insecure` (run only one at a time).
 
-Overrides: `K3D_CLUSTER`, `POCKETBASE_HTTPS_PORT`, `POCKETBASE_VERSION`, `ISTIO_PROFILE` (see `k3d/pocketbase-k3d.sh`).
-
 Create a superuser:
 
 ```bash
