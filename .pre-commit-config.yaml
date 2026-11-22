@@ -22,6 +22,12 @@ repos:
         pass_filenames: false
         files: ^music_browser/.*\.(rs|sql|html)$
 
+      - id: shellcheck
+        name: shellcheck (deploy)
+        entry: shellcheck
+        language: system
+        files: ^deploy/.*\.sh$
+
       - id: clang-format
         name: clang-format (music_ara_client)
         entry: clang-format -i --style=file
