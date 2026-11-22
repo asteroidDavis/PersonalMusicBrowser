@@ -214,7 +214,8 @@ cmd_upgrade() {
     IMAGE_TAG="${1:?usage: upgrade <image-tag> [helm args]}"
     shift
     cmd_backup
-    cmd_deploy "$@"
+    # Keep overrides from earlier deploys (e.g. music library mounts); the mini values and flags still win.
+    cmd_deploy --reset-then-reuse-values "$@"
 }
 
 cmd_rollback() {
