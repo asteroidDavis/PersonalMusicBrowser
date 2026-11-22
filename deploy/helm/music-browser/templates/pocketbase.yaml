@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pocketbase
+  labels: {{- include "mb.labels" . | nindent 4 }}
+    app: pocketbase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # SQLite: never two writers
+  selector:
+    matchLabels: {app: pocketbase}
+  template:
+    metadata:
+      labels: {app: pocketbase}
+      annotations: {{- include "mb.podAnnotations" . | nindent 8 }}
+    spec:
+      {{- include "mb.podCommon" . | nindent 6 }}
+      containers:
+        - name: pocketbase
+          image: "{{ .Values.image.registry }}/music-browser-pocketbase:{{ include "mb.tag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: {{ .Values.pocketbase.port }}}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 30
+            failureThreshold: 5
+          resources: {{- toYaml .Values.pocketbase.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /pb_data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        {{- include "mb.dataVolume" (dict "p" .Values.pocketbase.persistence "name" "pocketbase") | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pocketbase
+  labels: {{- include "mb.labels" . | nindent 4 }}
+spec:
+  selector: {app: pocketbase}
+  ports:
+    - {name: http, port: {{ .Values.pocketbase.port }}, targetPort: http}
+{{- include "mb.pvc" (dict "p" .Values.pocketbase.persistence "name" "pocketbase") }}

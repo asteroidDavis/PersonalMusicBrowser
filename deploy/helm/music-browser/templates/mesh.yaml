@@ -1,0 +1,25 @@
+{{- if .Values.mesh.sidecars }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: strict
+  labels: {{- include "mb.labels" . | nindent 4 }}
+spec:
+  mtls:
+    mode: STRICT
+---
+# Only the website talks to PocketBase (and the gateway when exposed).
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: pocketbase-callers
+  labels: {{- include "mb.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {app: pocketbase}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: [{{ .Release.Namespace | quote }}{{ if .Values.gateway.exposePocketbase }}, {{ .Values.gateway.namespace | quote }}{{ end }}]
+{{- end }}

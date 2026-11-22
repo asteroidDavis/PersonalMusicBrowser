@@ -1,0 +1,96 @@
+{{- $secret := lookup "v1" "Secret" .Release.Namespace "music-browser-csrf" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: music-browser-csrf
+  labels: {{- include "mb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if .Values.csrfSecret.value }}
+  CSRF_SECRET: {{ .Values.csrfSecret.value | b64enc }}
+  {{- else if $secret }}
+  CSRF_SECRET: {{ index $secret.data "CSRF_SECRET" }}
+  {{- else }}
+  CSRF_SECRET: {{ randAlphaNum 48 | b64enc }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: music-browser
+  labels: {{- include "mb.labels" . | nindent 4 }}
+    app: music-browser
+spec:
+  replicas: {{ .Values.musicBrowser.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: music-browser}
+  template:
+    metadata:
+      labels: {app: music-browser}
+      annotations: {{- include "mb.podAnnotations" . | nindent 8 }}
+    spec:
+      {{- include "mb.podCommon" . | nindent 6 }}
+      containers:
+        - name: music-browser
+          image: "{{ .Values.image.registry }}/music-browser:{{ include "mb.tag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: {{ .Values.musicBrowser.port }}}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - {name: BIND_ADDR, value: "0.0.0.0:{{ .Values.musicBrowser.port }}"}
+            - {name: DATABASE_URL, value: "sqlite:/data/music_browser.db"}
+            # In-mesh plain HTTP; the sidecars upgrade it to mTLS.
+            - {name: POCKETBASE_URL, value: "http://pocketbase:{{ .Values.pocketbase.port }}"}
+            # TLS ends at the gateway, but browsers only ever see HTTPS.
+            - {name: AUTH_COOKIE_SECURE, value: "true"}
+            - {name: CSRF_COOKIE_SECURE, value: "true"}
+            - {name: HOME, value: /data}
+            {{- if .Values.musicBrowser.musicPaths }}
+            {{- $roots := list "/data" }}
+            {{- range .Values.musicBrowser.musicPaths }}{{ $roots = append $roots .mountPath }}{{ end }}
+            - name: WORKFLOW_ALLOWED_ROOTS
+              value: {{ join "," $roots | quote }}
+            {{- end }}
+            {{- range $k, $v := .Values.musicBrowser.env }}
+            - {name: {{ $k }}, value: {{ $v | quote }}}
+            {{- end }}
+          envFrom:
+            - secretRef: {name: music-browser-csrf}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            failureThreshold: 5
+          resources: {{- toYaml .Values.musicBrowser.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            {{- range .Values.musicBrowser.musicPaths }}
+            - {name: {{ .name }}, mountPath: {{ .mountPath }}, readOnly: true}
+            {{- end }}
+      volumes:
+        {{- include "mb.dataVolume" (dict "p" .Values.musicBrowser.persistence "name" "music-browser") | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        {{- range .Values.musicBrowser.musicPaths }}
+        - name: {{ .name }}
+          hostPath: {path: {{ .hostPath }}, type: Directory}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: music-browser
+  labels: {{- include "mb.labels" . | nindent 4 }}
+spec:
+  selector: {app: music-browser}
+  ports:
+    - {name: http, port: {{ .Values.musicBrowser.port }}, targetPort: http}
+{{- include "mb.pvc" (dict "p" .Values.musicBrowser.persistence "name" "music-browser") }}
