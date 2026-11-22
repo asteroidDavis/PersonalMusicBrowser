@@ -84,4 +84,4 @@ mini-preflight:
 	@ssh "$(HOST)" 'sh -s -- $(PREFLIGHT_ARGS)' < deploy/mini/preflight.sh > mini-preflight.txt.tmp; \
 		rc=$$?; cat mini-preflight.txt.tmp; \
 		if [ $$rc -ne 0 ]; then echo "preflight over ssh failed (exit $$rc); kept the previous mini-preflight.txt"; rm -f mini-preflight.txt.tmp; exit $$rc; fi; \
-		mv mini-preflight.txt.tmp mini-preflight.txt; echo "Saved mini-preflight.txt"
+		mv mini-preflight.txt.tmp mini-preflight.txt && echo "Saved mini-preflight.txt"
